@@ -137,6 +137,18 @@ Rules:
   typical calculation slips), not obviously wrong filler.
 - The explanation should explain why the correct choice is right and,
   briefly, why the most tempting incorrect choice is wrong.
+- Math notation: since this is plain text (not rendered LaTeX), write math
+  using ONLY this fixed notation, exactly, so it can be parsed and
+  displayed correctly:
+    - Exponents: a caret, e.g. x^2, x^10, (x+1)^2. Use braces for a
+      multi-character exponent that includes an operator, e.g. x^{2n+1}.
+    - Subscripts: an underscore, e.g. x_1, a_n. Use braces the same way for
+      multi-character subscripts, e.g. a_{n+1}.
+    - Square roots: \sqrt{...}, e.g. \sqrt{16}, \sqrt{x+1}.
+    - Fractions: \frac{numerator}{denominator}, e.g. \frac{3}{4}.
+    - Do not use Unicode superscript/subscript characters, do not use "**"
+      for exponents, and do not wrap ordinary equations in unnecessary
+      outer parentheses (write "f(x) = x^2 + 1", not "(f(x)=x^2+1)").
 - Respond with valid JSON only, matching the schema described below, with
   no markdown, no code fences, and no commentary outside the JSON object.
 

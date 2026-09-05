@@ -1102,6 +1102,55 @@ function AnalyzeMistakeBlock({ errorId }) {
 }
 
 /**
+ * Turns the plain-text math notation the practice-question prompt asks the
+ * model for (x^2, x_1, \sqrt{16}, \frac{a}{b}) into actual superscripts,
+ * subscripts, radicals, and stacked fractions, instead of showing the raw
+ * caret/underscore/backslash characters verbatim. Deliberately a small
+ * regex-based renderer rather than a full LaTeX engine (no new dependency,
+ * and the prompt only asks the model for this small, fixed vocabulary of
+ * constructs) - see PRACTICE_QUESTION_SYSTEM_PROMPT in prompts.js for the
+ * exact notation this is built to match.
+ */
+function renderMathText(text) {
+  if (!text) return text;
+  const regex = /\\frac\{([^{}]*)\}\{([^{}]*)\}|\\sqrt\{([^{}]*)\}|sqrt\(([^()]*)\)|\^\{([^{}]+)\}|\^(-?[A-Za-z0-9.]+)|_\{([^{}]+)\}|_(-?[A-Za-z0-9.]+)/g;
+  const nodes = [];
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    const [, fracNum, fracDen, sqrtBraced, sqrtParen, supBraced, supPlain, subBraced, subPlain] = match;
+    if (fracNum !== undefined) {
+      nodes.push(
+        <span key={key++} className="mx-0.5 inline-flex flex-col items-center align-middle text-[0.85em] leading-tight">
+          <span className="px-0.5">{fracNum}</span>
+          <span className="w-full border-t border-current px-0.5">{fracDen}</span>
+        </span>,
+      );
+    } else if (sqrtBraced !== undefined || sqrtParen !== undefined) {
+      const inner = sqrtBraced !== undefined ? sqrtBraced : sqrtParen;
+      nodes.push(
+        <span key={key++} className="whitespace-nowrap">
+          &radic;<span className="border-t border-current px-0.5">{inner}</span>
+        </span>,
+      );
+    } else if (supBraced !== undefined || supPlain !== undefined) {
+      nodes.push(<sup key={key++}>{supBraced !== undefined ? supBraced : supPlain}</sup>);
+    } else {
+      nodes.push(<sub key={key++}>{subBraced !== undefined ? subBraced : subPlain}</sub>);
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+function MathText({ text, className }) {
+  return <span className={className}>{renderMathText(text)}</span>;
+}
+
+/**
  * "Practice a similar question" for a logged mistake. Talks to
  * /api/practice-question, which serves an unseen question from the shared
  * pool when one exists (no Groq call, no quota impact) and only generates a
@@ -1178,7 +1227,7 @@ function PracticeQuestionBlock({ err, quota, onQuotaUpdate }) {
       </div>
       {(result.message || result.warning) && <p className={`text-xs ${t.textFaint}`}>{result.message || result.warning}</p>}
       {quota && <p className={`text-xs ${t.textFaint}`}>{quota.remaining} of {quota.max} new practice questions left today</p>}
-      <p className="text-sm">{q.stem}</p>
+      <p className="text-sm"><MathText text={q.stem} /></p>
       <div className="space-y-1.5">
         {choices.map((c) => {
           const isCorrect = c.id === q.correctChoiceId;
@@ -1195,7 +1244,7 @@ function PracticeQuestionBlock({ err, quota, onQuotaUpdate }) {
               className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-default ${toneCls}`}
             >
               <span className="font-semibold">{c.id}.</span>
-              <span>{c.text}</span>
+              <span><MathText text={c.text} /></span>
             </button>
           );
         })}
@@ -1205,7 +1254,7 @@ function PracticeQuestionBlock({ err, quota, onQuotaUpdate }) {
           <p className="text-sm font-medium">
             {selected === q.correctChoiceId ? 'Correct!' : `Not quite — the correct answer is ${q.correctChoiceId}.`}
           </p>
-          {q.explanation && <p className={`text-sm ${t.textMuted}`}>{q.explanation}</p>}
+          {q.explanation && <p className={`text-sm ${t.textMuted}`}><MathText text={q.explanation} /></p>}
         </div>
       )}
     </div>
