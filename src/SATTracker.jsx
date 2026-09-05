@@ -970,14 +970,20 @@ function AnalyzeMistakeBlock({ errorId }) {
   const [state, setState] = useState('idle'); // idle | loading | ready | error
   const [analysis, setAnalysis] = useState(null);
   const [errMsg, setErrMsg] = useState('');
+  const [refreshNote, setRefreshNote] = useState('');
 
   async function run(forceRefresh) {
     setState('loading');
     setErrMsg('');
+    setRefreshNote('');
     try {
       const data = await analyzeMistakeApi(errorId, forceRefresh);
       setAnalysis(data.analysis);
       setState('ready');
+      if (forceRefresh && data.upToDate) {
+        setRefreshNote("Nothing's changed on this mistake since last time.");
+        setTimeout(() => setRefreshNote(''), 5000);
+      }
     } catch (err) {
       setErrMsg(err.message || 'Could not analyze this mistake.');
       setState('error');
@@ -1014,6 +1020,7 @@ function AnalyzeMistakeBlock({ errorId }) {
         <span className="flex items-center gap-1.5 text-sm font-semibold"><Lightbulb className="h-4 w-4" />AI explanation</span>
         <Button variant="ghost" size="sm" onClick={() => run(true)}><RefreshCw className="h-3.5 w-3.5" />Re-analyze</Button>
       </div>
+      {refreshNote && <p className={`text-xs ${t.textFaint}`}>{refreshNote}</p>}
       <div><span className={`text-xs font-medium ${t.textMuted}`}>Skill tested</span><p className="text-sm">{analysis.skillTested}</p></div>
       <div><span className={`text-xs font-medium ${t.textMuted}`}>What happened</span><p className="text-sm">{analysis.mistakeExplanation}</p></div>
       <div><span className={`text-xs font-medium ${t.textMuted}`}>Likely mistake type</span><p className="text-sm">{analysis.likelyMistakeType}</p></div>
@@ -1370,15 +1377,24 @@ function AIAnalysis({ tests, errors, goToTests }) {
   const [result, setResult] = useState(null);
   const [errMsg, setErrMsg] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState('');
 
   const load = useCallback(async (forceRefresh) => {
     if (forceRefresh) setRefreshing(true);
     else setState('loading');
     setErrMsg('');
+    setRefreshNote('');
     try {
       const data = await fetchPerformanceAnalysis(forceRefresh);
       setResult(data);
       setState('ready');
+      // Refresh was clicked but nothing has actually changed since the last
+      // analysis - we didn't call the AI again, just say so instead of
+      // silently doing nothing.
+      if (forceRefresh && data.upToDate) {
+        setRefreshNote("You're up to date - add a test or log a mistake to get a new analysis.");
+        setTimeout(() => setRefreshNote(''), 5000);
+      }
     } catch (err) {
       setErrMsg(err.message || 'Could not load your analysis.');
       setState('error');
@@ -1410,6 +1426,7 @@ function AIAnalysis({ tests, errors, goToTests }) {
           </Button>
         </div>
       )}
+      {refreshNote && <p className={`w-full text-right text-xs ${t.textFaint}`}>{refreshNote}</p>}
     </div>
   );
 

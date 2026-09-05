@@ -4,6 +4,11 @@ import { callGroq } from './_lib/groq.js';
 import { MISTAKE_ANALYSIS_SYSTEM_PROMPT } from './_lib/prompts.js';
 import { validateMistakeAnalysis } from './_lib/validate.js';
 
+// Minimum time between actual Groq calls for a given mistake, even when the
+// mistake row has changed. Protects against repeated "Re-analyze"/"Try
+// again" clicks (e.g. while Groq is down) each triggering their own call.
+const ATTEMPT_COOLDOWN_MS = 30_000;
+
 export default async function handler(req, res) {
   setCors(res);
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
@@ -13,8 +18,9 @@ export default async function handler(req, res) {
   if (!user) { res.status(401).json({ error: authError || 'Not authenticated' }); return; }
 
   const errorId = req.body?.errorId;
-  const forceRefresh = Boolean(req.body?.forceRefresh);
   if (!errorId || typeof errorId !== 'string') { res.status(400).json({ error: 'errorId is required' }); return; }
+
+  const attemptId = `mistake:${errorId}`;
 
   try {
     // RLS scopes this to the caller's own row; a mismatched id just returns
@@ -28,17 +34,41 @@ export default async function handler(req, res) {
     if (fetchErr) throw fetchErr;
     if (!errorRow) { res.status(404).json({ error: 'Mistake not found.' }); return; }
 
-    const { data: cache } = await client
-      .from('ai_mistake_analyses')
-      .select('*')
-      .eq('error_id', errorId)
-      .maybeSingle();
+    const [{ data: cache }, { data: lastAttempt }] = await Promise.all([
+      client.from('ai_mistake_analyses').select('*').eq('error_id', errorId).maybeSingle(),
+      client.from('ai_analysis_attempts').select('*').eq('id', attemptId).maybeSingle(),
+    ]);
 
+    // Nothing about this mistake has changed since it was last analyzed -
+    // always serve the cache. This is what stops "Re-analyze" from burning
+    // Groq quota: it only ever calls Groq again once the mistake itself
+    // (its notes, reason, status, etc.) has actually been edited.
     const isFresh = cache && new Date(cache.created_at) >= new Date(errorRow.updated_at);
-    if (cache && isFresh && !forceRefresh) {
-      res.status(200).json({ analysis: cache.analysis, cached: true, analyzedAt: cache.created_at, model: cache.model });
+    if (cache && isFresh) {
+      res.status(200).json({ analysis: cache.analysis, cached: true, upToDate: true, analyzedAt: cache.created_at, model: cache.model });
       return;
     }
+
+    // The mistake did change (or there's no cache yet) - still throttle how
+    // often we'll actually call Groq for it.
+    const msSinceLastAttempt = lastAttempt
+      ? Date.now() - new Date(lastAttempt.last_attempted_at).getTime()
+      : Infinity;
+    if (msSinceLastAttempt < ATTEMPT_COOLDOWN_MS) {
+      if (cache) {
+        res.status(200).json({
+          analysis: cache.analysis, cached: true, stale: true, analyzedAt: cache.created_at, model: cache.model,
+          warning: 'Please wait a moment before trying again.',
+        });
+        return;
+      }
+      res.status(429).json({ error: 'Please wait a moment before trying again.' });
+      return;
+    }
+
+    await client.from('ai_analysis_attempts').upsert({
+      id: attemptId, user_id: user.id, last_attempted_at: new Date().toISOString(),
+    });
 
     const { data: relatedRows } = await client
       .from('errors')
