@@ -9,8 +9,9 @@ import {
   LayoutDashboard, ClipboardList, AlertTriangle, BarChart3, Repeat, Target, Settings,
   Plus, Pencil, Trash2, X, Download, Upload, Search, ChevronDown, Menu, Sparkles,
   CheckCircle2, LogOut, Brain, Lightbulb, RefreshCw, TrendingUp, TrendingDown, Minus, Loader2,
+  Flame,
 } from 'lucide-react';
-import { fetchPerformanceAnalysis, analyzeMistake as analyzeMistakeApi } from './lib/ai';
+import { fetchPerformanceAnalysis, analyzeMistake as analyzeMistakeApi, requestPracticeQuestion } from './lib/ai';
 
 /* ------------------------------------------------------------------ */
 /*  Constants & data model                                             */
@@ -304,8 +305,10 @@ function GlobalStyles() {
       @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
       @keyframes sbFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
       .sb-fade-in { animation: sbFadeIn 0.35s ease-out; }
+      @keyframes sbStreakBump { 0% { transform: scale(1); } 35% { transform: scale(1.22); } 65% { transform: scale(0.94); } 100% { transform: scale(1); } }
+      .sb-streak-bump { animation: sbStreakBump 0.6s ease-out; }
       input:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid #D97706; outline-offset: 2px; }
-      @media (prefers-reduced-motion: reduce) { .sb-fade-in { animation: none; } }
+      @media (prefers-reduced-motion: reduce) { .sb-fade-in, .sb-streak-bump { animation: none; } }
     `}</style>
   );
 }
@@ -786,7 +789,59 @@ function TargetForm({ config, onSave }) {
 /*  Pages: Dashboard                                                    */
 /* ------------------------------------------------------------------ */
 
-function Dashboard({ tests, errors, config, onLoadDemo, goToTests }) {
+/**
+ * Current/longest streak indicator. The 0-day state is deliberately styled
+ * the same as any other neutral chip (not a broken-looking red/empty state)
+ * with encouraging copy instead of "0 days", so a brand-new user doesn't
+ * feel like something failed to load.
+ */
+function StreakBadge({ streak, size = 'md', forceDark = false }) {
+  const t = useTheme();
+  const [bump, setBump] = useState(false);
+  const prevRef = useRef(streak.currentStreak);
+
+  useEffect(() => {
+    if (streak.currentStreak > prevRef.current) {
+      setBump(true);
+      const timer = setTimeout(() => setBump(false), 650);
+      prevRef.current = streak.currentStreak;
+      return () => clearTimeout(timer);
+    }
+    prevRef.current = streak.currentStreak;
+    return undefined;
+  }, [streak.currentStreak]);
+
+  const active = streak.currentStreak > 0;
+  const sizeCls = size === 'sm' ? 'gap-1.5 px-2.5 py-1 text-xs' : 'gap-2 px-3.5 py-2 text-sm';
+  const iconSize = size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4';
+  // forceDark is for the sidebar, which is always a fixed dark navy panel
+  // regardless of the light/dark theme toggle - it needs its own fixed
+  // palette rather than the light/dark theme tokens, which would produce
+  // low-contrast (e.g. slate-200-on-navy) results in light mode.
+  const toneCls = forceDark
+    ? (active ? 'border-amber-500/30 bg-amber-500/15 text-amber-400' : 'border-slate-700 text-slate-500')
+    : active
+      ? (t.dark ? 'border-amber-500/30 bg-amber-500/15 text-amber-400' : 'border-amber-200 bg-amber-50 text-amber-700')
+      : `${t.border} ${t.textFaint}`;
+  const longestCls = forceDark ? 'text-slate-500' : t.textFaint;
+
+  return (
+    <div
+      className={`inline-flex items-center rounded-full border ${sizeCls} ${toneCls} ${bump ? 'sb-streak-bump' : ''}`}
+      title={streak.longestStreak > 0 ? `Longest streak: ${streak.longestStreak} day${streak.longestStreak === 1 ? '' : 's'}` : 'Do something in Scorebook today to start a streak'}
+    >
+      <Flame className={`${iconSize} ${active ? 'fill-current' : ''}`} />
+      <span className="font-semibold tabular-nums" style={size === 'sm' ? undefined : MONO}>
+        {active ? `${streak.currentStreak} day${streak.currentStreak === 1 ? '' : 's'}` : 'Start a streak'}
+      </span>
+      {size !== 'sm' && streak.longestStreak > 0 && (
+        <span className={`font-normal ${longestCls}`}>· longest {streak.longestStreak}</span>
+      )}
+    </div>
+  );
+}
+
+function Dashboard({ tests, errors, config, streak, onLoadDemo, goToTests }) {
   const t = useTheme();
   const sortedTests = useMemo(() => [...tests].sort((a, b) => (a.date < b.date ? -1 : 1)), [tests]);
   const latest = sortedTests[sortedTests.length - 1];
@@ -803,9 +858,12 @@ function Dashboard({ tests, errors, config, onLoadDemo, goToTests }) {
   if (tests.length === 0 && errors.length === 0) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold sm:text-3xl" style={SERIF}>Dashboard</h1>
-          <p className={`mt-1 text-sm ${t.textMuted}`}>A running scoreboard for your Digital SAT prep.</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold sm:text-3xl" style={SERIF}>Dashboard</h1>
+            <p className={`mt-1 text-sm ${t.textMuted}`}>A running scoreboard for your Digital SAT prep.</p>
+          </div>
+          <StreakBadge streak={streak} />
         </div>
         <EmptyState
           icon={Sparkles}
@@ -830,9 +888,12 @@ function Dashboard({ tests, errors, config, onLoadDemo, goToTests }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold sm:text-3xl" style={SERIF}>Dashboard</h1>
-        <p className={`mt-1 text-sm ${t.textMuted}`}>{config.userName ? `Welcome back, ${config.userName}.` : 'A running scoreboard for your Digital SAT prep.'}</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold sm:text-3xl" style={SERIF}>Dashboard</h1>
+          <p className={`mt-1 text-sm ${t.textMuted}`}>{config.userName ? `Welcome back, ${config.userName}.` : 'A running scoreboard for your Digital SAT prep.'}</p>
+        </div>
+        <StreakBadge streak={streak} />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -1040,7 +1101,118 @@ function AnalyzeMistakeBlock({ errorId }) {
   );
 }
 
-function ErrorCard({ err, testName, expanded, onToggle, onEdit, onDelete, onStatusChange }) {
+/**
+ * "Practice a similar question" for a logged mistake. Talks to
+ * /api/practice-question, which serves an unseen question from the shared
+ * pool when one exists (no Groq call, no quota impact) and only generates a
+ * new one via Groq once the pool is exhausted for this category - see that
+ * route for the full flow. `quota`/`onQuotaUpdate` are lifted to ErrorLog so
+ * the "N of 10 left today" indicator stays in sync across every mistake's
+ * card, not just the one most recently used.
+ */
+function PracticeQuestionBlock({ err, quota, onQuotaUpdate }) {
+  const t = useTheme();
+  const [state, setState] = useState('idle'); // idle | loading | ready | empty | error
+  const [result, setResult] = useState(null); // { question, source, message, warning }
+  const [errMsg, setErrMsg] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [revealed, setRevealed] = useState(false);
+
+  async function run() {
+    setState('loading');
+    setErrMsg('');
+    setSelected(null);
+    setRevealed(false);
+    try {
+      const data = await requestPracticeQuestion(err.id, todayIso());
+      if (data.quota) onQuotaUpdate(data.quota);
+      setResult(data);
+      setState(data.question ? 'ready' : 'empty');
+    } catch (e) {
+      setErrMsg(e.message || 'Could not get a practice question.');
+      setState('error');
+    }
+  }
+
+  if (state === 'idle') {
+    return (
+      <div className="space-y-1.5 pt-1">
+        <Button variant="secondary" size="sm" onClick={run}>
+          <Sparkles className="h-4 w-4" />Practice a similar question
+        </Button>
+        {quota && <p className={`text-xs ${t.textFaint}`}>{quota.remaining} of {quota.max} new practice questions left today</p>}
+      </div>
+    );
+  }
+  if (state === 'loading') {
+    return (
+      <div className={`flex items-center gap-2 rounded-lg border p-3 text-sm ${t.textMuted} ${t.border}`}>
+        <Loader2 className="h-4 w-4 animate-spin" />Finding a practice question...
+      </div>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-rose-600">{errMsg}</p>
+        <Button variant="secondary" size="sm" onClick={run}>Try again</Button>
+      </div>
+    );
+  }
+  if (state === 'empty') {
+    return (
+      <div className="space-y-2">
+        <p className={`text-sm ${t.textMuted}`}>{result?.message || "You're out of practice questions for today. Try again tomorrow."}</p>
+        <Button variant="ghost" size="sm" onClick={() => setState('idle')}>Dismiss</Button>
+      </div>
+    );
+  }
+
+  const q = result.question;
+  const choices = q.choices || [];
+  return (
+    <div className={`space-y-3 rounded-lg border p-4 ${t.dark ? 'border-indigo-900/40 bg-indigo-950/20' : 'border-indigo-200 bg-indigo-50'}`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="h-4 w-4" />Practice question</span>
+        <Button variant="ghost" size="sm" onClick={run}><RefreshCw className="h-3.5 w-3.5" />Get another</Button>
+      </div>
+      {(result.message || result.warning) && <p className={`text-xs ${t.textFaint}`}>{result.message || result.warning}</p>}
+      {quota && <p className={`text-xs ${t.textFaint}`}>{quota.remaining} of {quota.max} new practice questions left today</p>}
+      <p className="text-sm">{q.stem}</p>
+      <div className="space-y-1.5">
+        {choices.map((c) => {
+          const isCorrect = c.id === q.correctChoiceId;
+          const isSelected = c.id === selected;
+          let toneCls = `${t.border} ${t.hoverSubtle}`;
+          if (revealed && isCorrect) toneCls = t.dark ? 'border-emerald-600 bg-emerald-500/10' : 'border-emerald-400 bg-emerald-50';
+          else if (revealed && isSelected) toneCls = t.dark ? 'border-rose-700 bg-rose-500/10' : 'border-rose-300 bg-rose-50';
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => { setSelected(c.id); setRevealed(true); }}
+              disabled={revealed}
+              className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-default ${toneCls}`}
+            >
+              <span className="font-semibold">{c.id}.</span>
+              <span>{c.text}</span>
+            </button>
+          );
+        })}
+      </div>
+      {revealed && (
+        <div className="space-y-1 pt-1">
+          <p className="text-sm font-medium">
+            {selected === q.correctChoiceId ? 'Correct!' : `Not quite — the correct answer is ${q.correctChoiceId}.`}
+          </p>
+          {q.explanation && <p className={`text-sm ${t.textMuted}`}>{q.explanation}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ErrorCard({ err, testName, expanded, onToggle, onEdit, onDelete, onStatusChange, quota, onQuotaUpdate }) {
   const t = useTheme();
   return (
     <div className={`rounded-xl border ${t.card}`}>
@@ -1079,6 +1251,7 @@ function ErrorCard({ err, testName, expanded, onToggle, onEdit, onDelete, onStat
             </div>
           )}
           <AnalyzeMistakeBlock errorId={err.id} />
+          <PracticeQuestionBlock err={err} quota={quota} onQuotaUpdate={onQuotaUpdate} />
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
             <select value={err.status} onChange={(e) => onStatusChange(e.target.value)} className={`${inputCls(t)} w-auto`}>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1099,6 +1272,10 @@ function ErrorLog({ errors, tests, onAdd, onEdit, onDelete }) {
   const [modal, setModal] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [filters, setFilters] = useState({ section: 'All', domain: 'All', status: 'All', difficulty: 'All', q: '' });
+  // Lifted above individual ErrorCards so the "N of 10 left today" quota
+  // indicator stays consistent no matter which mistake's card last made a
+  // practice-question request - it's a per-user daily limit, not per-card.
+  const [quota, setQuota] = useState(null);
 
   const domainOptions = filters.section === 'All' ? [...DOMAINS[SECTION_MATH], ...DOMAINS[SECTION_RW]] : DOMAINS[filters.section];
 
@@ -1183,6 +1360,8 @@ function ErrorLog({ errors, tests, onAdd, onEdit, onDelete }) {
               onEdit={() => setModal({ edit: err })}
               onDelete={() => onDelete(err.id)}
               onStatusChange={(s) => onEdit(err.id, { ...err, status: s })}
+              quota={quota}
+              onQuotaUpdate={setQuota}
             />
           ))}
         </div>
@@ -1893,12 +2072,15 @@ function SettingsPage({ config, userEmail, onSignOut, onSaveName, onToggleTheme,
 /*  Navigation shell                                                    */
 /* ------------------------------------------------------------------ */
 
-function Sidebar({ page, setPage }) {
+function Sidebar({ page, setPage, streak }) {
   return (
     <aside className="hidden w-64 shrink-0 flex-col bg-slate-900 md:flex">
       <div className="px-6 py-7">
         <div className="text-xl font-semibold text-white" style={SERIF}>Scorebook</div>
         <div className="mt-1 text-xs text-slate-400">Digital SAT tracker</div>
+        <div className="mt-4">
+          <StreakBadge streak={streak} size="sm" forceDark />
+        </div>
       </div>
       <nav className="flex-1 space-y-0.5 px-3">
         {NAV_ITEMS.map((item) => {
@@ -1922,15 +2104,18 @@ function Sidebar({ page, setPage }) {
   );
 }
 
-function MobileTopBar({ page, setPage, open, setOpen }) {
+function MobileTopBar({ page, setPage, open, setOpen, streak }) {
   const t = useTheme();
   return (
     <div className={`sticky top-0 z-30 border-b md:hidden ${t.card}`}>
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
         <span className="text-lg font-semibold" style={SERIF}>Scorebook</span>
-        <button type="button" onClick={() => setOpen((o) => !o)} className={`rounded-lg p-2 ${t.hoverSubtle}`} aria-label="Toggle navigation">
-          <Menu className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          <StreakBadge streak={streak} size="sm" />
+          <button type="button" onClick={() => setOpen((o) => !o)} className={`rounded-lg p-2 ${t.hoverSubtle}`} aria-label="Toggle navigation">
+            <Menu className="h-5 w-5" />
+          </button>
+        </div>
       </div>
       {open && (
         <div className={`border-t p-2 ${t.border}`}>
@@ -1976,6 +2161,7 @@ export default function App() {
   const [tests, setTests] = useState([]);
   const [errors, setErrors] = useState([]);
   const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [streak, setStreak] = useState({ currentStreak: 0, longestStreak: 0, lastActiveDate: null });
   const [page, setPage] = useState('dashboard');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -1986,14 +2172,16 @@ export default function App() {
   const loadData = useCallback(async () => {
     setDbError(null);
     try {
-      const [safeTests, safeErrors, cfg] = await Promise.all([
+      const [safeTests, safeErrors, cfg, streakData] = await Promise.all([
         db.fetchTests(user.id),
         db.fetchErrors(user.id),
         db.fetchConfig(user.id),
+        db.fetchStreak(user.id),
       ]);
       setTests(safeTests);
       setErrors(safeErrors);
       setConfig(cfg);
+      setStreak(streakData);
     } catch (err) {
       console.error('Failed to load data from Supabase', err);
       setDbError('Could not load your data. Check your connection and try again.');
@@ -2011,11 +2199,24 @@ export default function App() {
   }
   function askConfirm(opts) { setConfirmState(opts); }
 
+  /**
+   * Tells the server "the user did something meaningful today" (see
+   * record_activity() in 0004_streaks.sql for the qualifying-activity
+   * definition and the actual increment/reset rules, which live in SQL, not
+   * here). Fire-and-forget by design, same as the AI-analysis refresh below
+   * - a failed streak update shouldn't block or error out whatever the user
+   * was actually trying to do.
+   */
+  function recordActivity() {
+    db.bumpStreak(todayIso()).then(setStreak).catch((err) => console.error('Could not update streak', err));
+  }
+
   async function addTest(data) {
     try {
       const rec = await db.insertTest(user.id, data);
       setTests((prev) => [...prev, rec]);
       pushToast('Practice test added.');
+      recordActivity();
       // Fire-and-forget: refreshes the cached AI analysis in the background so
       // it's ready (post-test review) by the time the student opens the AI
       // Analysis page, without blocking or slowing down this form submit.
@@ -2030,6 +2231,7 @@ export default function App() {
       const rec = await db.updateTestRow(id, data);
       setTests((prev) => prev.map((tst) => (tst.id === id ? rec : tst)));
       pushToast('Practice test updated.');
+      recordActivity();
     } catch (err) {
       console.error(err);
       pushToast('Could not update the test. Check your connection and try again.', 'error');
@@ -2060,6 +2262,7 @@ export default function App() {
       const rec = await db.insertErrorRow(user.id, data);
       setErrors((prev) => [...prev, rec]);
       pushToast('Mistake logged.');
+      recordActivity();
     } catch (err) {
       console.error(err);
       pushToast('Could not save the error. Check your connection and try again.', 'error');
@@ -2072,6 +2275,13 @@ export default function App() {
       const rec = await db.updateErrorRow(id, { ...current, ...data });
       setErrors((prev) => prev.map((e) => (e.id === id ? rec : e)));
       pushToast('Error updated.');
+      // "Mark an error reviewed" qualifies as streak activity - defined as
+      // the status actually changing away from Unreviewed into Reviewing or
+      // Mastered. Editing other fields, or changing status back to
+      // Unreviewed, doesn't count.
+      if (data.status && data.status !== current.status && data.status !== 'Unreviewed') {
+        recordActivity();
+      }
     } catch (err) {
       console.error(err);
       pushToast('Could not update the error. Check your connection and try again.', 'error');
@@ -2106,6 +2316,9 @@ export default function App() {
       const updatedIds = new Set(updated.map((e) => e.id));
       setErrors((prev) => prev.map((e) => (updatedIds.has(e.id) ? { ...e, status: toStatus } : e)));
       pushToast(`Marked ${topic} errors as ${toStatus}.`);
+      if (updated.length > 0 && (toStatus === 'Reviewing' || toStatus === 'Mastered')) {
+        recordActivity();
+      }
     } catch (err) {
       console.error(err);
       pushToast('Could not update those errors. Check your connection and try again.', 'error');
@@ -2250,9 +2463,9 @@ export default function App() {
       <div className={`min-h-screen ${tokens.pageBg} ${tokens.text}`} style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}>
         <GlobalStyles />
         <div className="flex min-h-screen">
-          <Sidebar page={page} setPage={setPage} />
+          <Sidebar page={page} setPage={setPage} streak={streak} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <MobileTopBar page={page} setPage={setPage} open={mobileNavOpen} setOpen={setMobileNavOpen} />
+            <MobileTopBar page={page} setPage={setPage} open={mobileNavOpen} setOpen={setMobileNavOpen} streak={streak} />
             <main key={page} className="sb-fade-in mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 md:px-10 md:py-10">
               {dbError && (
                 <div className={`mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${tokens.dark ? 'border-rose-900/50 bg-rose-950/30' : 'border-rose-200 bg-rose-50'}`}>
@@ -2260,7 +2473,7 @@ export default function App() {
                   <Button size="sm" variant="secondary" onClick={loadData}>Retry</Button>
                 </div>
               )}
-              {page === 'dashboard' && <Dashboard tests={tests} errors={errors} config={config} onLoadDemo={loadDemo} goToTests={() => setPage('tests')} />}
+              {page === 'dashboard' && <Dashboard tests={tests} errors={errors} config={config} streak={streak} onLoadDemo={loadDemo} goToTests={() => setPage('tests')} />}
               {page === 'tests' && <PracticeTests tests={tests} onAdd={addTest} onEdit={editTest} onDelete={deleteTest} />}
               {page === 'errors' && <ErrorLog errors={errors} tests={tests} onAdd={addError} onEdit={editError} onDelete={deleteError} />}
               {page === 'analytics' && <Analytics tests={tests} errors={errors} />}

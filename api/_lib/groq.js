@@ -7,14 +7,17 @@ const DEFAULT_MODEL = 'openai/gpt-oss-120b';
  * never a NEXT_PUBLIC_ or VITE_ variable) - it never appears in any response
  * sent to the browser, and this module is never imported by any client-side code.
  */
-export async function callGroq({ systemPrompt, userContent, maxTokens = 2000 }) {
+export async function callGroq({ systemPrompt, userContent, maxTokens = 2000, model: modelOverride }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     const err = new Error('AI analysis is not configured on the server.');
     err.code = 'missing_api_key';
     throw err;
   }
-  const model = DEFAULT_MODEL;
+  // Callers can opt into a different model (e.g. a smaller/cheaper one for
+  // simpler generation tasks) without affecting existing callers that don't
+  // pass one - they keep getting DEFAULT_MODEL exactly as before.
+  const model = modelOverride || DEFAULT_MODEL;
 
   let res;
   try {

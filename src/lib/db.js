@@ -255,6 +255,43 @@ export async function fetchConfig(userId) {
   return { ...profile, ...settings, ...goals };
 }
 
+// ------------------------------------------------------------------ streak --
+
+const DEFAULT_STREAK = { currentStreak: 0, longestStreak: 0, lastActiveDate: null };
+
+export async function fetchStreak(userId) {
+  const { data, error } = await supabase.from('user_streaks').select('*').eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  if (!data) return { ...DEFAULT_STREAK };
+  return {
+    currentStreak: data.current_streak ?? 0,
+    longestStreak: data.longest_streak ?? 0,
+    lastActiveDate: data.last_active_date ?? null,
+  };
+}
+
+/**
+ * Records a qualifying activity for today (localDate, the caller's own
+ * local calendar date - see todayIso() in SATTracker.jsx). The actual
+ * increment/reset/longest-streak rules live entirely in the
+ * record_activity() Postgres function (0004_streaks.sql migration) - this
+ * is intentionally NOT computed here and upserted, because a client-trusted
+ * write would let anyone set their own streak to any number. This function
+ * only tells the server "something happened today"; the server decides what
+ * that does to the numbers.
+ */
+export async function bumpStreak(localDate) {
+  const { data, error } = await supabase.rpc('record_activity', { p_local_date: localDate });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return { ...DEFAULT_STREAK };
+  return {
+    currentStreak: row.current_streak ?? 0,
+    longestStreak: row.longest_streak ?? 0,
+    lastActiveDate: row.last_active_date ?? null,
+  };
+}
+
 // -------------------------------------------------------------- bulk / reset --
 
 export async function deleteAllTestsAndErrors(userId) {

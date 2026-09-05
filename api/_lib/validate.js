@@ -85,6 +85,47 @@ export function validateGlobalAnalysis(raw, profile) {
   return { overallAssessment, strengths, weaknesses, recurringPatterns, improvement, studyPriorities, testStrategy };
 }
 
+const CHOICE_IDS = ['A', 'B', 'C', 'D'];
+
+/**
+ * Validates and sanitizes a generated practice question. Unlike the analysis
+ * validators above (which degrade gracefully to empty fields), a malformed
+ * question has no safe "empty" fallback a student could use - so this
+ * throws on anything that isn't a usable question, and the caller treats
+ * that the same as any other upstream failure (falls back to cache/pool,
+ * or a friendly error).
+ *
+ * section/domain/topic/difficulty are NOT read from Groq's response - they
+ * are the values we asked it to write about, already known and trusted by
+ * the caller, so we stamp them onto the returned object ourselves rather
+ * than trusting the model to echo them back correctly.
+ */
+export function validatePracticeQuestion(raw, { section, domain, topic, difficulty }) {
+  if (!raw || typeof raw !== 'object') throw new Error('AI response was not a valid object.');
+
+  const stem = str(raw.stem);
+  if (!stem) throw new Error('AI response was missing a question stem.');
+
+  const seenIds = new Set();
+  const choices = arr(raw.choices)
+    .map((c) => ({ id: str(c?.id).toUpperCase(), text: str(c?.text) }))
+    .filter((c) => CHOICE_IDS.includes(c.id) && c.text && !seenIds.has(c.id) && seenIds.add(c.id));
+  if (choices.length < 2) throw new Error('AI response did not include usable answer choices.');
+
+  const correctChoiceId = str(raw.correctChoiceId).toUpperCase();
+  if (!choices.some((c) => c.id === correctChoiceId)) {
+    throw new Error('AI response answer key did not match any answer choice.');
+  }
+
+  return {
+    section, domain, topic, difficulty,
+    stem,
+    choices,
+    correctChoiceId,
+    explanation: str(raw.explanation),
+  };
+}
+
 export function validateMistakeAnalysis(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('AI response was not a valid object.');
   return {

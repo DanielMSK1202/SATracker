@@ -43,3 +43,11 @@ export function fetchPerformanceAnalysis(forceRefresh = false) {
 export function analyzeMistake(errorId, forceRefresh = false) {
   return callApi('/api/ai-mistake-analysis', { errorId, forceRefresh });
 }
+
+// localDate is the caller's own local calendar date (YYYY-MM-DD, see
+// todayIso() in SATTracker.jsx) - used only to key the per-day quota
+// bucket server-side, the same client-supplied-local-date pattern already
+// used for practice_tests.date/errors.date.
+export function requestPracticeQuestion(errorId, localDate) {
+  return callApi('/api/practice-question', { errorId, localDate });
+}
