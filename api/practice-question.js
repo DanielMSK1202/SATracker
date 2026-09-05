@@ -15,7 +15,16 @@ const MAX_DAILY_GENERATIONS = 10;
 // smaller/cheaper/faster Groq model is a better fit here. This only affects
 // this route - api/ai-analysis.js and api/ai-mistake-analysis.js keep using
 // groq.js's DEFAULT_MODEL exactly as before.
+// gpt-oss-20b is a reasoning model: part of max_tokens is spent on internal
+// "thinking" before it writes the actual JSON answer, so this needs a much
+// bigger budget than the answer's own length would suggest - 700 was too
+// tight and caused Groq to reject truncated, invalid JSON (json_validate_failed)
+// before the model ever finished. reasoning_effort keeps that thinking short
+// since a single MCQ doesn't need deep reasoning, so this still stays fast
+// and cheap despite the larger ceiling.
 const PRACTICE_QUESTION_MODEL = 'openai/gpt-oss-20b';
+const PRACTICE_QUESTION_MAX_TOKENS = 2000;
+const PRACTICE_QUESTION_REASONING_EFFORT = 'low';
 
 // Flattens the DB row (metadata columns + a nested `question` jsonb blob)
 // into a single object the frontend can use directly - stem/choices/
@@ -133,8 +142,9 @@ export default async function handler(req, res) {
       const { parsed, model: usedModel } = await callGroq({
         systemPrompt: PRACTICE_QUESTION_SYSTEM_PROMPT,
         userContent: JSON.stringify({ section, domain, topic, difficulty }),
-        maxTokens: 700,
+        maxTokens: PRACTICE_QUESTION_MAX_TOKENS,
         model: PRACTICE_QUESTION_MODEL,
+        reasoningEffort: PRACTICE_QUESTION_REASONING_EFFORT,
       });
       validated = validatePracticeQuestion(parsed, { section, domain, topic, difficulty });
       model = usedModel;

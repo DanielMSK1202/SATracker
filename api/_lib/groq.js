@@ -7,7 +7,7 @@ const DEFAULT_MODEL = 'openai/gpt-oss-120b';
  * never a NEXT_PUBLIC_ or VITE_ variable) - it never appears in any response
  * sent to the browser, and this module is never imported by any client-side code.
  */
-export async function callGroq({ systemPrompt, userContent, maxTokens = 2000, model: modelOverride }) {
+export async function callGroq({ systemPrompt, userContent, maxTokens = 2000, model: modelOverride, reasoningEffort }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     const err = new Error('AI analysis is not configured on the server.');
@@ -32,6 +32,12 @@ export async function callGroq({ systemPrompt, userContent, maxTokens = 2000, mo
         temperature: 0.3,
         max_tokens: maxTokens,
         response_format: { type: 'json_object' },
+        // The gpt-oss models are reasoning models: they spend some of
+        // max_tokens "thinking" before writing the actual JSON answer. Only
+        // sent when a caller opts in (existing callers are unaffected), so
+        // a caller with a small maxTokens budget can also cap how much of
+        // it reasoning is allowed to eat before it ever reaches the answer.
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
