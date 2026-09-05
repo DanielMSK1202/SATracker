@@ -8,8 +8,9 @@ import {
 import {
   LayoutDashboard, ClipboardList, AlertTriangle, BarChart3, Repeat, Target, Settings,
   Plus, Pencil, Trash2, X, Download, Upload, Search, ChevronDown, Menu, Sparkles,
-  CheckCircle2, LogOut,
+  CheckCircle2, LogOut, Brain, Lightbulb, RefreshCw, TrendingUp, TrendingDown, Minus, Loader2,
 } from 'lucide-react';
+import { fetchPerformanceAnalysis, analyzeMistake as analyzeMistakeApi } from './lib/ai';
 
 /* ------------------------------------------------------------------ */
 /*  Constants & data model                                             */
@@ -43,6 +44,7 @@ const NAV_ITEMS = [
   { id: 'tests', label: 'Practice Tests', icon: ClipboardList },
   { id: 'errors', label: 'Error Log', icon: AlertTriangle },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'ai-analysis', label: 'AI Analysis', icon: Brain },
   { id: 'review', label: 'Review', icon: Repeat },
   { id: 'goals', label: 'Goals', icon: Target },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -963,6 +965,74 @@ function PracticeTests({ tests, onAdd, onEdit, onDelete }) {
 /*  Pages: Error Log                                                    */
 /* ------------------------------------------------------------------ */
 
+function AnalyzeMistakeBlock({ errorId }) {
+  const t = useTheme();
+  const [state, setState] = useState('idle'); // idle | loading | ready | error
+  const [analysis, setAnalysis] = useState(null);
+  const [errMsg, setErrMsg] = useState('');
+
+  async function run(forceRefresh) {
+    setState('loading');
+    setErrMsg('');
+    try {
+      const data = await analyzeMistakeApi(errorId, forceRefresh);
+      setAnalysis(data.analysis);
+      setState('ready');
+    } catch (err) {
+      setErrMsg(err.message || 'Could not analyze this mistake.');
+      setState('error');
+    }
+  }
+
+  if (state === 'idle') {
+    return (
+      <div className="pt-1">
+        <Button variant="secondary" size="sm" onClick={() => run(false)}>
+          <Lightbulb className="h-4 w-4" />Analyze mistake
+        </Button>
+      </div>
+    );
+  }
+  if (state === 'loading') {
+    return (
+      <div className={`flex items-center gap-2 rounded-lg border p-3 text-sm ${t.textMuted} ${t.border}`}>
+        <Loader2 className="h-4 w-4 animate-spin" />Analyzing this mistake...
+      </div>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-rose-600">{errMsg}</p>
+        <Button variant="secondary" size="sm" onClick={() => run(false)}>Try again</Button>
+      </div>
+    );
+  }
+  return (
+    <div className={`space-y-3 rounded-lg border p-4 ${t.dark ? 'border-amber-900/40 bg-amber-950/20' : 'border-amber-200 bg-amber-50'}`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-1.5 text-sm font-semibold"><Lightbulb className="h-4 w-4" />AI explanation</span>
+        <Button variant="ghost" size="sm" onClick={() => run(true)}><RefreshCw className="h-3.5 w-3.5" />Re-analyze</Button>
+      </div>
+      <div><span className={`text-xs font-medium ${t.textMuted}`}>Skill tested</span><p className="text-sm">{analysis.skillTested}</p></div>
+      <div><span className={`text-xs font-medium ${t.textMuted}`}>What happened</span><p className="text-sm">{analysis.mistakeExplanation}</p></div>
+      <div><span className={`text-xs font-medium ${t.textMuted}`}>Likely mistake type</span><p className="text-sm">{analysis.likelyMistakeType}</p></div>
+      {analysis.howToFix.length > 0 && (
+        <div>
+          <span className={`text-xs font-medium ${t.textMuted}`}>How to fix it</span>
+          <ul className="mt-1 list-inside list-disc space-y-1 text-sm">
+            {analysis.howToFix.map((step, i) => <li key={i}>{step}</li>)}
+          </ul>
+        </div>
+      )}
+      {analysis.rememberThis && (
+        <div><span className={`text-xs font-medium ${t.textMuted}`}>Remember this</span><p className="text-sm">{analysis.rememberThis}</p></div>
+      )}
+      <div><span className={`text-xs font-medium ${t.textMuted}`}>Related pattern</span><p className="text-sm">{analysis.relatedPattern}</p></div>
+    </div>
+  );
+}
+
 function ErrorCard({ err, testName, expanded, onToggle, onEdit, onDelete, onStatusChange }) {
   const t = useTheme();
   return (
@@ -1001,6 +1071,7 @@ function ErrorCard({ err, testName, expanded, onToggle, onEdit, onDelete, onStat
               <p className="text-sm">{err.explanation}</p>
             </div>
           )}
+          <AnalyzeMistakeBlock errorId={err.id} />
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
             <select value={err.status} onChange={(e) => onStatusChange(e.target.value)} className={`${inputCls(t)} w-auto`}>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -1225,6 +1296,313 @@ function Analytics({ tests, errors }) {
         <Card title="Error analytics">
           <p className={`text-sm ${t.textMuted}`}>Log mistakes in the Error Log to unlock analytics on domains, topics, and mistake reasons.</p>
         </Card>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Pages: AI Analysis                                                  */
+/* ------------------------------------------------------------------ */
+
+function dataMaturityBanner(maturity) {
+  if (maturity === 'minimal') return 'We need more data to identify reliable recurring patterns yet — treat this as an early read.';
+  if (maturity === 'developing') return 'Your profile is beginning to develop. More tests and logged mistakes will make pattern detection more reliable.';
+  return null;
+}
+
+function TrendValue({ value, suffix = '' }) {
+  const t = useTheme();
+  if (value == null) return <span className={t.textFaint}>—</span>;
+  if (value === 0) return <span className={`inline-flex items-center gap-1 ${t.textMuted}`}><Minus className="h-3.5 w-3.5" />0{suffix}</span>;
+  const up = value > 0;
+  return (
+    <span className={`inline-flex items-center gap-1 ${up ? 'text-emerald-600' : 'text-rose-600'}`}>
+      {up ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+      {up ? '+' : ''}{value}{suffix}
+    </span>
+  );
+}
+
+function ConfidenceBadge({ confidence }) {
+  const tone = confidence === 'high' ? 'emerald' : confidence === 'medium' ? 'amber' : 'sky';
+  return <Badge tone={tone}>{confidence} confidence</Badge>;
+}
+function SeverityBadge({ severity }) {
+  const tone = severity === 'high' ? 'rose' : severity === 'medium' ? 'amber' : 'sky';
+  return <Badge tone={tone}>{severity} priority</Badge>;
+}
+function ImprovementBadge({ status }) {
+  const map = {
+    improving: 'emerald', resolved: 'emerald', declining: 'rose', worsening: 'rose', new: 'indigo', stable: 'neutral',
+  };
+  return <Badge tone={map[status] || 'neutral'}>{status}</Badge>;
+}
+
+function SectionPerfCard({ label, data }) {
+  const t = useTheme();
+  return (
+    <div className={`rounded-xl border p-5 ${t.card}`}>
+      <div className={`text-sm font-medium ${t.textMuted}`}>{label}</div>
+      <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+        <div>
+          <div className={`text-xs ${t.textFaint}`}>Latest</div>
+          <div className="text-lg font-semibold tabular-nums" style={MONO}>{data.latestScore ?? '—'}</div>
+        </div>
+        <div>
+          <div className={`text-xs ${t.textFaint}`}>Average</div>
+          <div className="text-lg font-semibold tabular-nums" style={MONO}>{data.averageScore ?? '—'}</div>
+        </div>
+        <div>
+          <div className={`text-xs ${t.textFaint}`}>Best</div>
+          <div className="text-lg font-semibold tabular-nums" style={MONO}>{data.bestScore ?? '—'}</div>
+        </div>
+      </div>
+      <div className="mt-3 text-sm"><TrendValue value={data.trend} /></div>
+    </div>
+  );
+}
+
+function AIAnalysis({ tests, errors, goToTests }) {
+  const t = useTheme();
+  const hasAnyData = tests.length > 0 || errors.length > 0;
+  const [state, setState] = useState(hasAnyData ? 'loading' : 'empty');
+  const [result, setResult] = useState(null);
+  const [errMsg, setErrMsg] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async (forceRefresh) => {
+    if (forceRefresh) setRefreshing(true);
+    else setState('loading');
+    setErrMsg('');
+    try {
+      const data = await fetchPerformanceAnalysis(forceRefresh);
+      setResult(data);
+      setState('ready');
+    } catch (err) {
+      setErrMsg(err.message || 'Could not load your analysis.');
+      setState('error');
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (hasAnyData) load(false);
+    // Intentionally runs once on mount; "Refresh Analysis" handles later updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const header = (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold sm:text-3xl" style={SERIF}>AI Performance Analysis</h1>
+        <p className={`mt-1 text-sm ${t.textMuted}`}>Your performance analyzed across your tests and mistakes.</p>
+      </div>
+      {state === 'ready' && (
+        <div className="flex items-center gap-3">
+          {result?.analyzedAt && (
+            <span className={`text-xs ${t.textFaint}`}>Last analyzed: {fmtDate(result.analyzedAt.slice(0, 10))}</span>
+          )}
+          <Button variant="secondary" size="sm" onClick={() => load(true)} disabled={refreshing}>
+            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {refreshing ? 'Refreshing...' : 'Refresh analysis'}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
+  if (state === 'empty') {
+    return (
+      <div className="space-y-6">
+        {header}
+        <EmptyState
+          icon={Brain}
+          title="No performance data yet"
+          description="Complete your first test to start building your performance profile."
+          action={<Button onClick={goToTests}>Add a practice test</Button>}
+        />
+      </div>
+    );
+  }
+
+  if (state === 'loading') {
+    return (
+      <div className="space-y-6">
+        {header}
+        <div className={`flex items-center gap-3 rounded-xl border p-8 ${t.card}`}>
+          <Loader2 className={`h-5 w-5 animate-spin ${t.textMuted}`} />
+          <p className={`text-sm ${t.textMuted}`}>Analyzing your performance...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (state === 'error') {
+    return (
+      <div className="space-y-6">
+        {header}
+        <div className={`rounded-xl border p-8 text-center ${t.dark ? 'border-rose-900/50 bg-rose-950/30' : 'border-rose-200 bg-rose-50'}`}>
+          <p className="text-sm text-rose-600">{errMsg}</p>
+          <div className="mt-4"><Button variant="secondary" onClick={() => load(false)}>Try again</Button></div>
+        </div>
+      </div>
+    );
+  }
+
+  const { analysis, profile, warning } = result;
+  const banner = dataMaturityBanner(profile.dataMaturity);
+  const byReasonData = (profile.mistakeReasons || []).map((r) => ({ name: r.name, value: r.count }));
+  const byDifficultyData = (profile.difficultyDistribution || []).map((d) => ({ name: d.name, value: d.count }));
+
+  return (
+    <div className="space-y-6">
+      {header}
+
+      {warning && (
+        <div className={`rounded-xl border p-4 text-sm ${t.dark ? 'border-amber-900/50 bg-amber-950/30 text-amber-400' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+          {warning}
+        </div>
+      )}
+      {banner && <div className={`rounded-xl border p-4 text-sm ${t.textMuted} ${t.card}`}>{banner}</div>}
+
+      <Card title="Overall performance">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+          <div><div className={`text-xs ${t.textFaint}`}>Latest score</div><div className="mt-1 text-2xl font-semibold tabular-nums" style={MONO}>{profile.overall.latestScore ?? '—'}</div></div>
+          <div><div className={`text-xs ${t.textFaint}`}>Average score</div><div className="mt-1 text-2xl font-semibold tabular-nums" style={MONO}>{profile.overall.averageScore ?? '—'}</div></div>
+          <div><div className={`text-xs ${t.textFaint}`}>Best score</div><div className="mt-1 text-2xl font-semibold tabular-nums" style={MONO}>{profile.overall.bestScore ?? '—'}</div></div>
+          <div><div className={`text-xs ${t.textFaint}`}>Score trend</div><div className="mt-1 text-2xl font-semibold"><TrendValue value={profile.overall.scoreTrend} /></div></div>
+          <div><div className={`text-xs ${t.textFaint}`}>Tests completed</div><div className="mt-1 text-2xl font-semibold tabular-nums" style={MONO}>{profile.overall.testsTaken}</div></div>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <SectionPerfCard label="Math" data={profile.sections[SECTION_MATH]} />
+        <SectionPerfCard label="Reading & Writing" data={profile.sections[SECTION_RW]} />
+      </div>
+
+      <Card title="AI summary">
+        <div className="mb-3"><ConfidenceBadge confidence={analysis.overallAssessment.confidence} /></div>
+        <p className="text-sm leading-relaxed">{analysis.overallAssessment.summary}</p>
+      </Card>
+
+      {analysis.strengths.length > 0 && (
+        <Card title="Top strengths">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {analysis.strengths.map((s, i) => (
+              <div key={i} className={`rounded-lg border p-4 ${t.border}`}>
+                <h4 className="text-sm font-semibold text-emerald-600">{s.title}</h4>
+                <p className="mt-1.5 text-sm">{s.description}</p>
+                {s.evidence && <p className={`mt-2 text-xs ${t.textFaint}`}>{s.evidence}</p>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {analysis.weaknesses.length > 0 && (
+        <Card title="Top weaknesses" subtitle="Ranked by priority — fix these first.">
+          <div className="space-y-4">
+            {analysis.weaknesses.map((w, i) => (
+              <div key={i} className={`rounded-lg border p-4 ${t.border}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-sm font-semibold ${t.text}`}>{i + 1}. {w.title}</span>
+                    {w.section && <Badge tone={w.section === SECTION_MATH ? 'indigo' : 'sky'}>{w.section}</Badge>}
+                  </div>
+                  <SeverityBadge severity={w.severity} />
+                </div>
+                <p className="mt-2 text-sm">{w.description}</p>
+                {w.evidence && <p className={`mt-2 text-xs ${t.textFaint}`}>Evidence: {w.evidence}</p>}
+                {w.whyItMatters && <p className={`mt-2 text-sm ${t.textMuted}`}>Why it matters: {w.whyItMatters}</p>}
+                {w.howToImprove.length > 0 && (
+                  <ul className="mt-3 list-inside list-disc space-y-1 text-sm">
+                    {w.howToImprove.map((step, j) => <li key={j}>{step}</li>)}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {analysis.recurringPatterns.length > 0 && (
+        <Card title="Recurring mistakes">
+          <div className="space-y-4">
+            {analysis.recurringPatterns.map((p, i) => (
+              <div key={i} className={`rounded-lg border p-4 ${t.border}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-semibold">{p.title}</span>
+                  <Badge tone="amber">{p.frequency} occurrence{p.frequency === 1 ? '' : 's'}</Badge>
+                </div>
+                <p className="mt-2 text-sm">{p.description}</p>
+                {p.evidence && <p className={`mt-2 text-xs ${t.textFaint}`}>{p.evidence}</p>}
+                {p.solution && <p className="mt-2 text-sm text-emerald-600">Fix: {p.solution}</p>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card title="What improved" subtitle={!profile.improvementContext.hasPrevious ? 'First analysis — improvement tracking appears after your next refresh.' : undefined}>
+        {analysis.improvement.length === 0 ? (
+          <p className={`text-sm ${t.textFaint}`}>
+            {profile.improvementContext.hasPrevious ? 'No notable changes since your last analysis.' : 'Come back after your next test or refresh to see how your weak areas are trending.'}
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {analysis.improvement.map((imp, i) => (
+              <div key={i} className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-sm font-medium">{imp.area}</span>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm ${t.textMuted}`}>{imp.description}</span>
+                  <ImprovementBadge status={imp.status} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {analysis.studyPriorities.length > 0 && (
+        <Card title="What to study next">
+          <div className="space-y-3">
+            {analysis.studyPriorities.map((p, i) => (
+              <div key={i} className={`rounded-lg border p-4 ${t.border}`}>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-600 text-xs font-semibold text-white">{p.priority ?? i + 1}</span>
+                  <span className="text-sm font-semibold">{p.topic}</span>
+                </div>
+                {p.reason && <p className="mt-2 text-sm">{p.reason}</p>}
+                {p.recommendedPractice && <p className={`mt-1.5 text-sm ${t.textMuted}`}>{p.recommendedPractice}</p>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {analysis.testStrategy.length > 0 && (
+        <Card title="Test strategy">
+          <ul className="list-inside list-disc space-y-1.5 text-sm">
+            {analysis.testStrategy.map((tip, i) => <li key={i}>{tip}</li>)}
+          </ul>
+        </Card>
+      )}
+
+      {(byReasonData.length > 0 || byDifficultyData.length > 0) && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {byReasonData.length > 0 && (
+            <Card title="Mistake reasons" subtitle="Deterministic count from your logged mistakes.">
+              <RankedBarChart data={byReasonData} color={CHART_COLORS.reason} height={Math.max(160, byReasonData.length * 36)} />
+            </Card>
+          )}
+          {byDifficultyData.length > 0 && (
+            <Card title="Mistake difficulty" subtitle="Difficulty of logged mistakes only, not overall accuracy.">
+              <RankedBarChart data={byDifficultyData} color={CHART_COLORS.total} height={Math.max(160, byDifficultyData.length * 36)} />
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1621,6 +1999,10 @@ export default function App() {
       const rec = await db.insertTest(user.id, data);
       setTests((prev) => [...prev, rec]);
       pushToast('Practice test added.');
+      // Fire-and-forget: refreshes the cached AI analysis in the background so
+      // it's ready (post-test review) by the time the student opens the AI
+      // Analysis page, without blocking or slowing down this form submit.
+      fetchPerformanceAnalysis(true).catch(() => { /* surfaced on the AI Analysis page itself, not here */ });
     } catch (err) {
       console.error(err);
       pushToast('Could not save the test. Check your connection and try again.', 'error');
@@ -1865,6 +2247,7 @@ export default function App() {
               {page === 'tests' && <PracticeTests tests={tests} onAdd={addTest} onEdit={editTest} onDelete={deleteTest} />}
               {page === 'errors' && <ErrorLog errors={errors} tests={tests} onAdd={addError} onEdit={editError} onDelete={deleteError} />}
               {page === 'analytics' && <Analytics tests={tests} errors={errors} />}
+              {page === 'ai-analysis' && <AIAnalysis tests={tests} errors={errors} goToTests={() => setPage('tests')} />}
               {page === 'review' && <Review errors={errors} onBulkStatus={bulkSetStatusForTopic} onSetStatus={setErrorStatus} />}
               {page === 'goals' && <Goals tests={tests} config={config} onSaveTargets={saveTargets} />}
               {page === 'settings' && (
