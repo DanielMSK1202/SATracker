@@ -1109,11 +1109,14 @@ function AnalyzeMistakeBlock({ errorId }) {
  * regex-based renderer rather than a full LaTeX engine (no new dependency,
  * and the prompt only asks the model for this small, fixed vocabulary of
  * constructs) - see PRACTICE_QUESTION_SYSTEM_PROMPT in prompts.js for the
- * exact notation this is built to match.
+ * exact notation this is built to match. The leading backslash on
+ * \sqrt/\frac is made optional here (matching "sqrt{...}"/"frac{...}" too)
+ * as a defensive fallback for whenever the model drops it despite being
+ * told not to - the prompt is the source of truth, this is just a safety net.
  */
 function renderMathText(text) {
   if (!text) return text;
-  const regex = /\\frac\{([^{}]*)\}\{([^{}]*)\}|\\sqrt\{([^{}]*)\}|sqrt\(([^()]*)\)|\^\{([^{}]+)\}|\^(-?[A-Za-z0-9.]+)|_\{([^{}]+)\}|_(-?[A-Za-z0-9.]+)/g;
+  const regex = /\\?frac\{([^{}]*)\}\{([^{}]*)\}|\\?sqrt\{([^{}]*)\}|\\?sqrt\(([^()]*)\)|\^\{([^{}]+)\}|\^(-?[A-Za-z0-9.]+)|_\{([^{}]+)\}|_(-?[A-Za-z0-9.]+)/g;
   const nodes = [];
   let lastIndex = 0;
   let match;

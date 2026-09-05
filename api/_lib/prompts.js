@@ -133,13 +133,29 @@ Rules:
   direct step, "Medium" should require combining two ideas or steps,
   "Hard" should require a multi-step or less obvious approach - but the
   question must still have exactly one unambiguously correct answer.
+- Choose numbers deliberately so the problem actually works out cleanly to
+  one of your four choices - don't pick a scenario first and hope the math
+  cooperates. If your first choice of numbers doesn't produce a clean
+  answer that exactly matches one of the four choices, change the numbers
+  (not the answer) until it does.
+- Before writing your final answer, privately work through the solution
+  step by step and confirm the result exactly matches one of your four
+  choices. Do this thinking silently - it must never appear in your output.
+  The "explanation" field is the finished, final explanation only: never
+  include your reasoning process, scratch work, false starts, or
+  self-corrections in it. Do not write words or phrases like "wait",
+  "actually", "let me reconsider", "hmm", or present more than one
+  candidate answer anywhere in the choices or explanation. State the
+  correct solution path directly and confidently, as if you already knew
+  the answer before you started writing.
 - The three incorrect choices should be plausible (common misconceptions or
   typical calculation slips), not obviously wrong filler.
 - The explanation should explain why the correct choice is right and,
   briefly, why the most tempting incorrect choice is wrong.
 - Math notation: since this is plain text (not rendered LaTeX), write math
   using ONLY this fixed notation, exactly, so it can be parsed and
-  displayed correctly:
+  displayed correctly - always include the leading backslash on \sqrt and
+  \frac exactly as shown, never "sqrt{...}" or "frac{...}" without it:
     - Exponents: a caret, e.g. x^2, x^10, (x+1)^2. Use braces for a
       multi-character exponent that includes an operator, e.g. x^{2n+1}.
     - Subscripts: an underscore, e.g. x_1, a_n. Use braces the same way for

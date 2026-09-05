@@ -15,16 +15,21 @@ const MAX_DAILY_GENERATIONS = 10;
 // smaller/cheaper/faster Groq model is a better fit here. This only affects
 // this route - api/ai-analysis.js and api/ai-mistake-analysis.js keep using
 // groq.js's DEFAULT_MODEL exactly as before.
+//
 // gpt-oss-20b is a reasoning model: part of max_tokens is spent on internal
 // "thinking" before it writes the actual JSON answer, so this needs a much
-// bigger budget than the answer's own length would suggest - 700 was too
-// tight and caused Groq to reject truncated, invalid JSON (json_validate_failed)
-// before the model ever finished. reasoning_effort keeps that thinking short
-// since a single MCQ doesn't need deep reasoning, so this still stays fast
-// and cheap despite the larger ceiling.
+// bigger budget than the answer's own length would suggest.
+// reasoning_effort was originally set to 'low' to keep this fast/cheap, but
+// that starved real math problems of enough internal reasoning - instead of
+// solving it privately, the model started "thinking out loud" inside the
+// explanation field itself (visible hedging like "wait, that's wrong" or
+// "actually...") and sometimes committed to an answer that contradicted its
+// own work. 'medium' gives it enough room to actually work the problem out
+// before answering, at the cost of a bit more latency - still far
+// cheaper/faster than the 120b model used for full analysis.
 const PRACTICE_QUESTION_MODEL = 'openai/gpt-oss-20b';
-const PRACTICE_QUESTION_MAX_TOKENS = 2000;
-const PRACTICE_QUESTION_REASONING_EFFORT = 'low';
+const PRACTICE_QUESTION_MAX_TOKENS = 3000;
+const PRACTICE_QUESTION_REASONING_EFFORT = 'medium';
 
 // Flattens the DB row (metadata columns + a nested `question` jsonb blob)
 // into a single object the frontend can use directly - stem/choices/
