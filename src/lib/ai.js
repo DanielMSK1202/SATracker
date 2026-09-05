@@ -1,33 +1,45 @@
 import { supabase } from './supabaseClient';
 
 /**
- * Thin wrappers around supabase.functions.invoke. The Supabase client
- * automatically attaches the current user's access token as the
- * Authorization header, which the edge functions use to identify the user
- * server-side - nothing about "who this is" is ever sent in the request
- * body, and the Groq API key never touches the browser.
+ * Calls our own Vercel serverless functions under /api/, attaching the
+ * current user's Supabase access token so the function can verify who is
+ * calling (server-side, via the Authorization header) - nothing about
+ * "who this is" is ever sent in the request body, and the Groq API key
+ * never touches the browser.
  */
-
-async function invoke(name, payload) {
-  const { data, error } = await supabase.functions.invoke(name, { body: payload });
-  if (error) {
-    // supabase-js puts a parsed error body on error.context when available;
-    // fall back to a generic message otherwise so nothing internal leaks.
-    let message = 'AI analysis is temporarily unavailable. Please try again shortly.';
-    try {
-      const body = await error.context?.json?.();
-      if (body?.error) message = body.error;
-    } catch (e) { /* keep generic message */ }
-    const wrapped = new Error(message);
-    throw wrapped;
+async function callApi(path, payload) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    throw new Error('Your session has expired. Please sign in again.');
   }
-  return data;
+
+  let res;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    throw new Error('AI analysis is temporarily unavailable. Please try again shortly.');
+  }
+
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* non-JSON error page, fall through */ }
+
+  if (!res.ok) {
+    throw new Error(body?.error || 'AI analysis is temporarily unavailable. Please try again shortly.');
+  }
+  return body;
 }
 
 export function fetchPerformanceAnalysis(forceRefresh = false) {
-  return invoke('ai-analysis', { forceRefresh });
+  return callApi('/api/ai-analysis', { forceRefresh });
 }
 
 export function analyzeMistake(errorId, forceRefresh = false) {
-  return invoke('ai-mistake-analysis', { errorId, forceRefresh });
+  return callApi('/api/ai-mistake-analysis', { errorId, forceRefresh });
 }
