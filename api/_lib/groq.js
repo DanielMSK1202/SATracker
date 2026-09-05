@@ -14,7 +14,7 @@ export async function callGroq({ systemPrompt, userContent, maxTokens = 2000 }) 
     err.code = 'missing_api_key';
     throw err;
   }
-  const model = process.env.GROQ_MODEL || DEFAULT_MODEL;
+  const model = 'llama-3.3-70b-versatile'
 
   let res;
   try {
