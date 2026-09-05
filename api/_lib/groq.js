@@ -1,5 +1,5 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+const DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
 /**
  * Calls Groq's OpenAI-compatible chat completions endpoint. The API key is
@@ -14,7 +14,7 @@ export async function callGroq({ systemPrompt, userContent, maxTokens = 2000 }) 
     err.code = 'missing_api_key';
     throw err;
   }
-  const model = 'llama-3.3-70b-versatile'
+  const model = DEFAULT_MODEL;
 
   let res;
   try {
