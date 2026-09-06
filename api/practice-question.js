@@ -8,14 +8,15 @@ import { DIFFICULTIES, SECTION_MATH, SECTION_RW } from './_lib/taxonomy.js';
 // Max NEW Gemini generations per user per calendar day. Serving an existing
 // pool question (the common case once the pool has some depth) never
 // touches this - see claim_pool_question() in the 0005 migration.
-const MAX_DAILY_GENERATIONS = 10;
+const MAX_DAILY_GENERATIONS = 3;
 
 // Question generation now runs on Gemini instead of Groq (api/ai-analysis.js
 // and api/ai-mistake-analysis.js are unaffected and keep using groq.js
-// exactly as before). Leaving maxTokens generous since, same as the old
-// gpt-oss-20b, Gemini's own internal "thinking" (if the model does any)
-// draws from this budget before it writes the actual JSON answer.
-const PRACTICE_QUESTION_MAX_TOKENS = 3000;
+// exactly as before). maxTokens is generous because, depending on the exact
+// model/API version, Gemini's internal "thinking" tokens (see thinkingBudget
+// in gemini.js) can count against this same budget before it writes the
+// actual JSON answer.
+const PRACTICE_QUESTION_MAX_TOKENS = 4000;
 
 // Flattens the DB row (metadata columns + a nested `question` jsonb blob)
 // into a single object the frontend can use directly - stem/choices/

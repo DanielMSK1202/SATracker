@@ -14,8 +14,20 @@ const DEFAULT_MODEL = 'gemini-flash-latest';
  * NEXT_PUBLIC_ or VITE_ variable) - it never appears in any response sent
  * to the browser, and this module is never imported by any client-side
  * code.
+ *
+ * thinkingBudget (default -1, "dynamic") lets the model spend extra tokens
+ * privately reasoning before it commits to a final answer, the same idea as
+ * the reasoning_effort setting groq.js uses for gpt-oss - without it, Flash
+ * models tend to answer in one pass and are more prone to exactly the kind
+ * of self-contradicting explanation ("must be singular... option B
+ * correctly uses the singular verb 'have'") that this was added to fix. Not
+ * every model/API version accepts this field, so if the request comes back
+ * rejecting it specifically, this transparently retries once without it
+ * rather than failing the whole request.
  */
-export async function callGemini({ systemPrompt, userContent, maxTokens = 2000, model: modelOverride, temperature = 0.3 }) {
+export async function callGemini({
+  systemPrompt, userContent, maxTokens = 2000, model: modelOverride, temperature = 0.3, thinkingBudget = -1,
+}) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     const err = new Error('AI question generation is not configured on the server.');
@@ -25,21 +37,32 @@ export async function callGemini({ systemPrompt, userContent, maxTokens = 2000, 
   const model = modelOverride || process.env.GEMINI_MODEL || DEFAULT_MODEL;
   const url = `${GEMINI_URL_BASE}/${model}:generateContent?key=${apiKey}`;
 
+  const buildBody = (includeThinking) => ({
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: 'user', parts: [{ text: userContent }] }],
+    generationConfig: {
+      temperature,
+      maxOutputTokens: maxTokens,
+      responseMimeType: 'application/json',
+      ...(includeThinking && thinkingBudget !== undefined ? { thinkingConfig: { thinkingBudget } } : {}),
+    },
+  });
+
+  const doFetch = (body) => fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
   let res;
   try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: userContent }] }],
-        generationConfig: {
-          temperature,
-          maxOutputTokens: maxTokens,
-          responseMimeType: 'application/json',
-        },
-      }),
-    });
+    res = await doFetch(buildBody(true));
+    if (res.status === 400 && thinkingBudget !== undefined) {
+      const probeText = await res.clone().text().catch(() => '');
+      if (/thinkingConfig|thinking_config|thinkingBudget/i.test(probeText)) {
+        res = await doFetch(buildBody(false));
+      }
+    }
   } catch (err) {
     const wrapped = new Error('Could not reach the AI question generation service.');
     wrapped.code = 'network_error';

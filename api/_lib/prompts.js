@@ -148,6 +148,13 @@ Rules:
   candidate answer anywhere in the choices or explanation. State the
   correct solution path directly and confidently, as if you already knew
   the answer before you started writing.
+- After drafting the explanation, re-read every factual or grammatical
+  claim in it against the actual answer text and verify each one is true -
+  e.g. if you say a rule requires a singular verb, the specific word you
+  then point to as satisfying that rule must actually be singular, not
+  plural. A rule stated correctly but then misapplied to the wrong choice
+  is as wrong as citing the wrong rule - rewrite the explanation if any
+  claim in it doesn't hold up under this check.
 - The three incorrect choices should be plausible (common misconceptions or
   typical calculation slips), not obviously wrong filler.
 - The explanation should explain why the correct choice is right and,
