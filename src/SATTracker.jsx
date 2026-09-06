@@ -1229,6 +1229,25 @@ function renderMathNodes(text, keyRef) {
       }
     }
 
+    // Defensive fallback for stray $...$ / $$...$$ math delimiters some
+    // models add out of habit despite being told not to (this app has no
+    // LaTeX renderer, so a bare $ would otherwise show up literally) - only
+    // treated as a delimiter pair when there's no whitespace before the
+    // closing $, so an ordinary price like "$5 to $10" is left alone.
+    if (ch === '$') {
+      let end = -1;
+      for (let k = i + 1; k < text.length; k++) {
+        if (text[k] === ' ' || text[k] === '\n') break;
+        if (text[k] === '$') { end = k; break; }
+      }
+      if (end > i + 1) {
+        flush();
+        nodes.push(...renderMathNodes(text.slice(i + 1, end), keyRef));
+        i = end + 1;
+        continue;
+      }
+    }
+
     if (ch === '\\') {
       const hit = SYMBOL_REPLACEMENTS.find(([token]) => text.startsWith(token, i));
       if (hit) {
@@ -2227,7 +2246,7 @@ function SettingsPage({ config, userEmail, onSignOut, onSaveName, onToggleTheme,
 
 function Sidebar({ page, setPage, streak }) {
   return (
-    <aside className="hidden w-64 shrink-0 flex-col bg-slate-900 md:flex">
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 md:flex">
       <div className="px-6 py-7">
         <div className="text-xl font-semibold text-white" style={SERIF}>Scorebook</div>
         <div className="mt-1 text-xs text-slate-400">Digital SAT tracker</div>

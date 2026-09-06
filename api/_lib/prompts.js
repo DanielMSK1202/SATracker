@@ -155,7 +155,10 @@ Rules:
 - Math notation: since this is plain text (not rendered LaTeX), write math
   using ONLY this fixed notation, exactly, so it can be parsed and
   displayed correctly - always include the leading backslash on \sqrt and
-  \frac exactly as shown, never "sqrt{...}" or "frac{...}" without it:
+  \frac exactly as shown, never "sqrt{...}" or "frac{...}" without it. Do
+  not wrap any math in $ or $$ dollar-sign delimiters (e.g. write
+  x^2-4x+k=0, never $x^2-4x+k=0$ or $$x^2-4x+k=0$$) - there is no LaTeX
+  renderer here, so a stray $ shows up as a literal character:
     - Exponents: a caret, e.g. x^2, x^10, (x+1)^2. Use braces for a
       multi-character exponent that includes an operator, e.g. x^{2n+1}.
     - Subscripts: an underscore, e.g. x_1, a_n. Use braces the same way for
