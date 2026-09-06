@@ -23,13 +23,34 @@ export function createUserScopedClient(req) {
 /**
  * Verifies the request's JWT and returns the authenticated user, or null if
  * the token is missing/invalid/expired. Never trusts a client-supplied user id.
+ *
+ * Also rejects users whose profiles.is_blocked flag is set, so every api/
+ * route that calls this (which is all of them) gets blocking enforcement for
+ * free without repeating the check in each file. This is a fast-fail
+ * convenience layer, NOT the real backstop against a blocked user reaching
+ * data: the RLS policies and SECURITY DEFINER functions in
+ * supabase/migrations/0006_admin_panel.sql enforce the same thing
+ * independently and are what actually stop a blocked user's Supabase client
+ * from reading/writing anything directly (which most of this app's CRUD
+ * does, bypassing api/ entirely).
  */
 export async function getAuthenticatedUser(req) {
   const { client } = createUserScopedClient(req);
   if (!client) return { client: null, user: null, error: 'Missing Authorization header' };
   const { data, error } = await client.auth.getUser();
   if (error || !data?.user) {
-    return { client, user: null, error: error?.message || 'Invalid or expired session' };
+    return { client, user: null, error: error?.message || 'Invalid or expired session', blocked: false };
   }
-  return { client, user: data.user, error: null };
+
+  const { data: profile } = await client
+    .from('profiles')
+    .select('is_blocked')
+    .eq('id', data.user.id)
+    .maybeSingle();
+
+  if (profile?.is_blocked) {
+    return { client, user: null, error: 'Your account has been blocked.', blocked: true };
+  }
+
+  return { client, user: data.user, error: null, blocked: false };
 }

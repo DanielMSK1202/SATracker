@@ -4,11 +4,11 @@ import { callGemini } from './_lib/gemini.js';
 import { PRACTICE_QUESTION_SYSTEM_PROMPT } from './_lib/prompts.js';
 import { validatePracticeQuestion } from './_lib/validate.js';
 import { DIFFICULTIES, SECTION_MATH, SECTION_RW } from './_lib/taxonomy.js';
+import { MAX_DAILY_GENERATIONS } from './_lib/config.js';
 
 // Max NEW Gemini generations per user per calendar day. Serving an existing
 // pool question (the common case once the pool has some depth) never
 // touches this - see claim_pool_question() in the 0005 migration.
-const MAX_DAILY_GENERATIONS = 3;
 
 // Question generation now runs on Gemini instead of Groq (api/ai-analysis.js
 // and api/ai-mistake-analysis.js are unaffected and keep using groq.js
@@ -44,8 +44,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
 
-  const { client, user, error: authError } = await getAuthenticatedUser(req);
-  if (!user) { res.status(401).json({ error: authError || 'Not authenticated' }); return; }
+  const { client, user, error: authError, blocked } = await getAuthenticatedUser(req);
+  if (!user) { res.status(blocked ? 403 : 401).json({ error: authError || 'Not authenticated' }); return; }
 
   const errorId = req.body?.errorId;
   // The client's own local calendar date (YYYY-MM-DD) - this app has no

@@ -52,7 +52,11 @@ sat-tracker/
 ├── supabase/
 │   ├── migrations/
 │   │   ├── 0001_init.sql          Tables, RLS policies, signup trigger
-│   │   └── 0002_ai_analysis.sql    AI analysis cache tables + RLS
+│   │   ├── 0002_ai_analysis.sql    AI analysis cache tables + RLS
+│   │   ├── 0003_ai_analysis_attempts.sql  Retry rate-limiting table
+│   │   ├── 0004_streaks.sql       user_streaks + record_activity()
+│   │   ├── 0005_practice_questions.sql  Shared question pool + quota
+│   │   └── 0006_admin_panel.sql   is_blocked + admin-only SECURITY DEFINER functions
 │   └── functions/
 │       ├── _shared/                Code shared by both edge functions
 │       │   ├── cors.ts              CORS headers + JSON response helper
@@ -66,9 +70,11 @@ sat-tracker/
 │       └── ai-mistake-analysis/index.ts  Single-mistake analysis endpoint
 └── src/
     ├── main.jsx                   React entry point, renders <AppRoot />
-    ├── AppRoot.jsx                Top-level gate: config check → auth → migration → app
+    ├── AppRoot.jsx                Top-level gate: config check → auth → blocked check → migration → app
     ├── SATTracker.jsx             The application (all pages, components, CRUD logic)
     ├── index.css                  Tailwind layers + base resets
+    ├── admin/
+    │   └── AdminPanel.jsx          Admin-only Users/Questions/Quota tabs (nav visibility is cosmetic only)
     ├── auth/
     │   ├── AuthContext.jsx         Supabase Auth session state + sign up/in/out
     │   ├── AuthScreen.jsx          Sign up / log in screen
@@ -76,9 +82,25 @@ sat-tracker/
     ├── lib/
     │   ├── supabaseClient.js       Supabase client (reads env vars)
     │   ├── db.js                   All Supabase table queries; maps DB rows <-> app models
-    │   └── ai.js                   Invokes the two AI edge functions
+    │   ├── ai.js                   Invokes the AI serverless routes
+    │   └── adminApi.js             Invokes the admin-only serverless routes
     └── utils/
         └── storage.js              localStorage adapter (used only for migration)
+```
+
+`api/` (Vercel serverless functions, not shown in the tree above since it sits
+outside `src/`):
+```
+api/
+├── _lib/
+│   ├── cors.js                    CORS headers
+│   ├── supabaseClient.js          User-scoped Supabase client + auth check (now also rejects is_blocked users)
+│   ├── config.js                  Shared server-only constants (e.g. MAX_DAILY_GENERATIONS)
+│   ├── taxonomy.js, validate.js, prompts.js, gemini.js, groq.js, analytics.js
+├── ai-analysis.js, ai-mistake-analysis.js, practice-question.js
+└── admin/
+    ├── users.js                    List users + stats, toggle is_blocked (admin-only)
+    └── questions.js                 List/filter the shared question pool, delete a question (admin-only)
 ```
 
 ## Requirements
@@ -91,7 +113,7 @@ sat-tracker/
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. In the SQL Editor, run every file in `supabase/migrations/` **in order**
-   (0001 → 0005) — each is safe to re-run:
+   (0001 → 0006) — each is safe to re-run:
    - `0001_init.sql` — `profiles`, `settings`, `goals`, `practice_tests`,
      `errors`, owner-only RLS, signup trigger.
    - `0002_ai_analysis.sql` — `ai_analyses` / `ai_mistake_analyses`, the AI
@@ -109,6 +131,19 @@ sat-tracker/
      existing pool question before ever calling Gemini. **If this one
      hasn't been run yet, "Practice a similar question" will fail or 500**
      — it's easy to miss since the README didn't mention it before.
+   - `0006_admin_panel.sql` — adds `is_blocked` to `profiles`; adds a
+     `_not_blocked()` check to every existing owner-scoped RLS policy and
+     every existing `SECURITY DEFINER` function from 0004/0005 (blocking is
+     enforced everywhere a user could reach their own data, not just in
+     `api/`); and adds four admin-only `SECURITY DEFINER` functions
+     (`admin_list_users`, `admin_toggle_user_blocked`,
+     `admin_list_questions`, `admin_delete_question`), each gated by a
+     single hardcoded admin UUID.
+     **⚠️ Before running this file**, open it and replace the placeholder
+     UUID inside `public._admin_uid()` with your own `auth.users.id`
+     (**Authentication → Users** in the Supabase dashboard, copy the UID
+     next to your account). That is the only line in the whole schema that
+     names the admin account — see "Changing the admin account" below.
 3. In **Project Settings → API**, copy the **Project URL** and the
    **anon public key**.
 4. In **Authentication → Providers**, Email is enabled by default — that's
@@ -132,21 +167,45 @@ sat-tracker/
    Both are read server-side only (`process.env...` inside `api/_lib/`) —
    never bundled into the frontend, never sent to the browser, and not read
    from any `VITE_*` variable. Redeploy after adding/changing them.
+6. **Set the admin identity.** The admin panel (`api/admin/users.js`,
+   `api/admin/questions.js`) checks the caller's id against this env var
+   server-side — it does **not** trust anything the client sends. In your
+   **Vercel project → Settings → Environment Variables**, add:
+   ```
+   ADMIN_USER_ID=your-own-auth-users-id   # same UID you put in 0006's _admin_uid()
+   ```
+   This must be the exact same UUID you set in
+   `supabase/migrations/0006_admin_panel.sql`'s `_admin_uid()` function — if
+   they don't match, the admin panel will 403 for everyone, including you.
+   Redeploy after adding/changing it.
 
 ## Environment variables
 
-Copy `.env.example` to `.env.local` and fill in the two values from step 3
+Copy `.env.example` to `.env.local` and fill in the values from the steps
 above:
 
 ```
 VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-public-key
+VITE_ADMIN_USER_ID=your-own-auth-users-id
 ```
 
 `.env.local` is already excluded via `.gitignore` — never commit real
 credentials. Only the `anon` key is used client-side; it's safe to expose
 (that's what RLS is for). Vite only exposes env vars prefixed `VITE_` to
-the browser, and only these two are read (`src/lib/supabaseClient.js`).
+the browser.
+
+`VITE_ADMIN_USER_ID` controls **only** whether the Admin nav tab renders for
+the signed-in user — it is a convenience so non-admins never even see the
+tab, not a security boundary. Every actual admin check happens server-side
+(`api/admin/*.js` against `process.env.ADMIN_USER_ID`, and independently
+again inside Postgres against the literal in `_admin_uid()`), so setting
+this to the wrong value only hides/shows a tab; it can never grant or deny
+real access by itself.
+
+Vercel-side vars (`GROQ_API_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`,
+`ADMIN_USER_ID`) are documented in step 5–6 of **Supabase setup** above —
+they're read server-side only and are never `VITE_`-prefixed.
 
 ## Run it
 
@@ -166,8 +225,8 @@ npm run preview
 ```
 
 `npm run build` outputs static files to `dist/` — deployable to any static
-host (Netlify, Vercel, GitHub Pages, S3, etc.). Set the two `VITE_SUPABASE_*`
-env vars in your host's build settings the same way.
+host (Netlify, Vercel, GitHub Pages, S3, etc.). Set the `VITE_SUPABASE_*`
+and `VITE_ADMIN_USER_ID` env vars in your host's build settings the same way.
 
 ## Data & persistence
 
@@ -185,6 +244,71 @@ local-storage version, they're asked **"Import existing local SAT Tracker
 data?"** with **Import** or **Skip** — nothing is imported or deleted
 automatically, and the original local data is left untouched either way so
 the choice is never destructive.
+
+## Admin panel
+
+A single hardcoded account — yours — gets an **Admin** tab with three
+sub-tabs:
+
+- **Users** — every account's display name, join date, practice-test count,
+  logged-error count, current streak, and today's practice-question quota
+  usage, with a **Block/Unblock** button per row.
+- **Questions** — the shared `generated_questions` pool, filterable by
+  section/domain/topic/difficulty, showing how many distinct users have
+  viewed each question, with a **Delete** action for removing a bad or
+  wrong AI-generated question.
+- **Quota** — today's per-user practice-question generation usage as a
+  progress bar (see "Practice questions" below for what counts against it).
+
+**Blocking a user** flips `profiles.is_blocked`. A blocked user can still
+log in (so they see a clear message instead of a broken app), but every
+read and write of their own data is rejected — this is enforced in Postgres
+itself (Row Level Security policies and every `SECURITY DEFINER` function),
+not just in the `api/` routes, so it holds even for the direct
+Supabase-client calls this app's core CRUD (`src/lib/db.js`) makes,
+completely bypassing `api/`. The admin account can never block itself.
+
+**Security model.** Nothing about "am I the admin" is ever trusted from the
+browser. Every admin action is checked independently in three places:
+1. `api/admin/users.js` / `api/admin/questions.js` verify the caller's
+   Supabase session (JWT), then check the caller's id against
+   `process.env.ADMIN_USER_ID` — a 403 if it doesn't match, before doing
+   anything else.
+2. Every admin-only Postgres function (`admin_list_users`,
+   `admin_toggle_user_blocked`, `admin_list_questions`,
+   `admin_delete_question`) independently re-checks `auth.uid()` against
+   the hardcoded literal in `_admin_uid()` and **raises an exception** (not
+   just an empty result) if it doesn't match — this holds even if the
+   Vercel-side check above were somehow bypassed, and even if someone
+   called these functions directly (e.g. via the Supabase client-side SDK)
+   rather than through `api/admin/*.js`.
+3. The frontend hides the **Admin** nav tab unless the signed-in user's id
+   matches `VITE_ADMIN_USER_ID` — this is cosmetic only (a non-admin who
+   somehow navigated to the admin page directly would still get 403s from
+   every request), never the real boundary.
+
+There is no service-role key anywhere in this app, for the admin panel or
+otherwise — everything above runs through the same anon-key + RLS +
+`SECURITY DEFINER` architecture already used for `generated_questions` in
+`0005_practice_questions.sql`.
+
+### Changing the admin account
+
+If you ever need to make a different account the admin (e.g. a new email),
+update the UUID in **all three** of these places and redeploy — they must
+always match each other:
+1. **Postgres**: edit the UUID literal inside `public._admin_uid()` in
+   `supabase/migrations/0006_admin_panel.sql`, then run just that one
+   `CREATE OR REPLACE FUNCTION public._admin_uid() ...` statement again in
+   the Supabase SQL Editor (safe to re-run; every other admin function
+   calls `_admin_uid()` indirectly, so nothing else needs to change).
+2. **Vercel**: update `ADMIN_USER_ID` in Project Settings → Environment
+   Variables, then redeploy.
+3. **Frontend**: update `VITE_ADMIN_USER_ID` in your build environment
+   (and local `.env.local` if you develop against the same project), then
+   rebuild/redeploy. This one only affects whether the nav tab shows — it's
+   the least important of the three to keep in sync, but keep it in sync
+   anyway to avoid confusing "why don't I see my own tab" moments.
 
 ## Features
 
@@ -215,7 +339,7 @@ the choice is never destructive.
   they haven't seen yet instead of triggering a new Gemini call, so token
   spend only grows with the number of distinct categories, not the number
   of requests. Each user is capped at **3 new Gemini generations per
-  calendar day** (`MAX_DAILY_GENERATIONS` in `api/practice-question.js`) —
+  calendar day** (`MAX_DAILY_GENERATIONS` in `api/_lib/config.js`) —
   pulling an existing pool question never counts against this. Once the
   daily cap is hit, the UI shows an explicit "you're out of practice
   questions for today" message (falling back to a previously-seen pool
@@ -252,3 +376,7 @@ the choice is never destructive.
   meaningfully reduces but can't mathematically guarantee zero risk from a
   malformed or adversarial model response — there is no code execution or
   tool-calling access granted to the model, which limits the practical impact.
+- The admin panel has exactly one admin account, hardcoded (see "Changing
+  the admin account" above) — there is no multi-admin support, no role
+  hierarchy, and no audit log of admin actions (blocks/unblocks and question
+  deletions are not recorded anywhere beyond their immediate effect).

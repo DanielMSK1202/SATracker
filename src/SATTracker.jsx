@@ -9,18 +9,19 @@ import {
   LayoutDashboard, ClipboardList, AlertTriangle, BarChart3, Repeat, Target, Settings,
   Plus, Pencil, Trash2, X, Download, Upload, Search, ChevronDown, Menu, Sparkles,
   CheckCircle2, LogOut, Brain, Lightbulb, RefreshCw, TrendingUp, TrendingDown, Minus, Loader2,
-  Flame,
+  Flame, ShieldAlert,
 } from 'lucide-react';
 import { fetchPerformanceAnalysis, analyzeMistake as analyzeMistakeApi, requestPracticeQuestion } from './lib/ai';
+import AdminPanel from './admin/AdminPanel.jsx';
 
 /* ------------------------------------------------------------------ */
 /*  Constants & data model                                             */
 /* ------------------------------------------------------------------ */
 
-const SECTION_MATH = 'Math';
-const SECTION_RW = 'Reading & Writing';
+export const SECTION_MATH = 'Math';
+export const SECTION_RW = 'Reading & Writing';
 
-const DOMAINS = {
+export const DOMAINS = {
   [SECTION_MATH]: ['Algebra', 'Advanced Math', 'Problem-Solving and Data Analysis', 'Geometry and Trigonometry'],
   [SECTION_RW]: ['Information and Ideas', 'Craft and Structure', 'Expression of Ideas', 'Standard English Conventions'],
 };
@@ -37,7 +38,7 @@ const TOPICS = {
 };
 
 const REASONS = ['Careless error', 'Misread the question', "Didn't know the concept", 'Ran out of time', 'Wrong strategy or approach', 'Overcomplicated it', 'Second-guessed the correct answer', 'Other'];
-const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
+export const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
 const STATUSES = ['Unreviewed', 'Reviewing', 'Mastered'];
 
 const NAV_ITEMS = [
@@ -50,6 +51,10 @@ const NAV_ITEMS = [
   { id: 'goals', label: 'Goals', icon: Target },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
+
+// Cosmetic only, never the real security boundary - see AdminPanel.jsx and
+// api/admin/*.js, which independently verify the caller server-side.
+const ADMIN_NAV_ITEM = { id: 'admin', label: 'Admin', icon: ShieldAlert };
 
 const DEFAULT_CONFIG = { userName: '', theme: 'light', targetTotal: 1400, targetMath: 700, targetRW: 700 };
 export const K = { TESTS: 'sat-tracker:practice-tests', ERRORS: 'sat-tracker:error-log', CONFIG: 'sat-tracker:app-config' };
@@ -92,7 +97,7 @@ function toLocalIso(d) {
 }
 // Uses local calendar date components (not toISOString, which is UTC-based and can
 // land on the wrong day near midnight depending on the browser's time zone).
-function todayIso() { return toLocalIso(new Date()); }
+export function todayIso() { return toLocalIso(new Date()); }
 function isoDaysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return toLocalIso(d); }
 function statusTone(status) { return status === 'Mastered' ? 'emerald' : status === 'Reviewing' ? 'amber' : 'rose'; }
 
@@ -274,7 +279,7 @@ const darkTokens = {
   chip: 'bg-slate-800 text-slate-300 border-slate-700',
 };
 export const ThemeCtx = createContext(lightTokens);
-const useTheme = () => useContext(ThemeCtx);
+export const useTheme = () => useContext(ThemeCtx);
 export const inputCls = (t) => `w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors ${t.input}`;
 
 // Shared dialog behavior for Modal/ConfirmDialog: closes on Escape and locks
@@ -2244,7 +2249,7 @@ function SettingsPage({ config, userEmail, onSignOut, onSaveName, onToggleTheme,
 /*  Navigation shell                                                    */
 /* ------------------------------------------------------------------ */
 
-function Sidebar({ page, setPage, streak }) {
+function Sidebar({ page, setPage, streak, navItems }) {
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 md:flex">
       <div className="px-6 py-7">
@@ -2255,7 +2260,7 @@ function Sidebar({ page, setPage, streak }) {
         </div>
       </div>
       <nav className="flex-1 space-y-0.5 px-3">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = page === item.id;
           const Icon = item.icon;
           return (
@@ -2276,7 +2281,7 @@ function Sidebar({ page, setPage, streak }) {
   );
 }
 
-function MobileTopBar({ page, setPage, open, setOpen, streak }) {
+function MobileTopBar({ page, setPage, open, setOpen, streak, navItems }) {
   const t = useTheme();
   return (
     <div className={`sticky top-0 z-30 border-b md:hidden ${t.card}`}>
@@ -2291,7 +2296,7 @@ function MobileTopBar({ page, setPage, open, setOpen, streak }) {
       </div>
       {open && (
         <div className={`border-t p-2 ${t.border}`}>
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const active = page === item.id;
             return (
@@ -2329,6 +2334,13 @@ export function LoadingScreen() {
 
 export default function App() {
   const { user, signOut } = useAuth();
+  // Cosmetic gate only: hides/shows the nav tab and page. The real boundary
+  // is server-side (RLS + SECURITY DEFINER functions checking auth.uid(),
+  // and api/admin/*.js checking process.env.ADMIN_USER_ID) - see
+  // supabase/migrations/0006_admin_panel.sql. Nothing sent from this flag
+  // is trusted by the server.
+  const isAdmin = Boolean(user?.id && import.meta.env.VITE_ADMIN_USER_ID && user.id === import.meta.env.VITE_ADMIN_USER_ID);
+  const navItems = isAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
   const [loading, setLoading] = useState(true);
   const [tests, setTests] = useState([]);
   const [errors, setErrors] = useState([]);
@@ -2635,9 +2647,9 @@ export default function App() {
       <div className={`min-h-screen ${tokens.pageBg} ${tokens.text}`} style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}>
         <GlobalStyles />
         <div className="flex min-h-screen">
-          <Sidebar page={page} setPage={setPage} streak={streak} />
+          <Sidebar page={page} setPage={setPage} streak={streak} navItems={navItems} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <MobileTopBar page={page} setPage={setPage} open={mobileNavOpen} setOpen={setMobileNavOpen} streak={streak} />
+            <MobileTopBar page={page} setPage={setPage} open={mobileNavOpen} setOpen={setMobileNavOpen} streak={streak} navItems={navItems} />
             <main key={page} className="sb-fade-in mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 md:px-10 md:py-10">
               {dbError && (
                 <div className={`mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${tokens.dark ? 'border-rose-900/50 bg-rose-950/30' : 'border-rose-200 bg-rose-50'}`}>
@@ -2666,6 +2678,7 @@ export default function App() {
                   onDeleteAll={deleteAllData}
                 />
               )}
+              {page === 'admin' && isAdmin && <AdminPanel />}
             </main>
           </div>
         </div>
