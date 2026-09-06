@@ -90,32 +90,48 @@ sat-tracker/
 ## Supabase setup
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. In the SQL Editor, run `supabase/migrations/0001_init.sql`, then
-   `supabase/migrations/0002_ai_analysis.sql`, in that order. The first
-   creates `profiles`, `settings`, `goals`, `practice_tests`, and `errors`
-   with owner-only RLS and a signup trigger. The second adds `ai_analyses`
-   and `ai_mistake_analyses`, the AI feature's result cache, also owner-only.
-   Both are safe to re-run.
+2. In the SQL Editor, run every file in `supabase/migrations/` **in order**
+   (0001 → 0005) — each is safe to re-run:
+   - `0001_init.sql` — `profiles`, `settings`, `goals`, `practice_tests`,
+     `errors`, owner-only RLS, signup trigger.
+   - `0002_ai_analysis.sql` — `ai_analyses` / `ai_mistake_analyses`, the AI
+     analysis result cache, also owner-only.
+   - `0003_ai_analysis_attempts.sql` — `ai_analysis_attempts`, a
+     last-attempt timestamp per target so retries (not just successes) are
+     rate-limited even when Groq is down.
+   - `0004_streaks.sql` — `user_streaks` and the server-side function that
+     maintains it.
+   - `0005_practice_questions.sql` — the shared practice-question pool:
+     `generated_questions` (every AI-generated question, keyed by
+     section/domain/topic/difficulty), `user_question_views` (so a user
+     never gets a repeat), `practice_question_quota` (per-user daily new-
+     generation count), and the `SECURITY DEFINER` functions that serve an
+     existing pool question before ever calling Gemini. **If this one
+     hasn't been run yet, "Practice a similar question" will fail or 500**
+     — it's easy to miss since the README didn't mention it before.
 3. In **Project Settings → API**, copy the **Project URL** and the
    **anon public key**.
 4. In **Authentication → Providers**, Email is enabled by default — that's
    all this app uses. (Optional: turn off "Confirm email" while developing so
    new accounts can log in immediately.)
-5. **Deploy the AI edge functions** (requires the
-   [Supabase CLI](https://supabase.com/docs/guides/cli)):
-   ```bash
-   supabase login
-   supabase link --project-ref YOUR_PROJECT_REF
-   supabase secrets set GROQ_API_KEY=your-groq-api-key
-   supabase functions deploy ai-analysis
-   supabase functions deploy ai-mistake-analysis
+5. **Set the AI provider keys.** The AI analysis, per-mistake explanation,
+   and practice-question features are **Vercel serverless functions** under
+   `api/` (`api/ai-analysis.js`, `api/ai-mistake-analysis.js`,
+   `api/practice-question.js`), not Supabase Edge Functions — despite the
+   `supabase/functions/` folder still present in this repo from an earlier
+   version, it is no longer called by the frontend (`src/lib/ai.js` calls
+   the relative `/api/...` routes) and can be ignored/removed. Instead, set
+   these in your **Vercel project → Settings → Environment Variables**:
    ```
-   Get a Groq API key from [console.groq.com](https://console.groq.com). The
-   key is stored as a Supabase secret and is only ever read inside the edge
-   functions (`Deno.env.get('GROQ_API_KEY')`) — it is never bundled into the
-   frontend, never sent to the browser, and not read from any `VITE_*`
-   variable. `SUPABASE_URL` and `SUPABASE_ANON_KEY` are provided to edge
-   functions automatically by the platform; you don't set those yourself.
+   GROQ_API_KEY=your-groq-api-key       # AI Analysis + Analyze Mistake
+   GEMINI_API_KEY=your-gemini-api-key   # Practice question generation
+   GEMINI_MODEL=gemini-flash-latest     # optional override
+   ```
+   Get a Groq key from [console.groq.com](https://console.groq.com) and a
+   Gemini key from [aistudio.google.com](https://aistudio.google.com/apikey).
+   Both are read server-side only (`process.env...` inside `api/_lib/`) —
+   never bundled into the frontend, never sent to the browser, and not read
+   from any `VITE_*` variable. Redeploy after adding/changing them.
 
 ## Environment variables
 
@@ -190,6 +206,21 @@ the choice is never destructive.
   improvement tracking vs. your last analysis, ranked study priorities, test
   strategy tips, plus a per-mistake "Analyze mistake" explanation in the
   Error Log. Not a chatbot — no chat history, no free-text question box.
+- **Practice questions** — "Practice a similar question" on any logged
+  mistake generates a multiple-choice question (via Gemini) matching that
+  mistake's section/domain/topic/difficulty. Every generated question is
+  saved to a **shared pool** (`generated_questions`) keyed by that same
+  section/domain/topic/difficulty combination: the next time *any* user
+  requests that same category, they're served an existing pool question
+  they haven't seen yet instead of triggering a new Gemini call, so token
+  spend only grows with the number of distinct categories, not the number
+  of requests. Each user is capped at **3 new Gemini generations per
+  calendar day** (`MAX_DAILY_GENERATIONS` in `api/practice-question.js`) —
+  pulling an existing pool question never counts against this. Once the
+  daily cap is hit, the UI shows an explicit "you're out of practice
+  questions for today" message (falling back to a previously-seen pool
+  question when one exists for that category) rather than silently
+  re-showing the same question.
 
 ## Known limitations
 

@@ -7,7 +7,7 @@
 --   user_question_views     — which user has seen which pool question, so
 --                              the same user isn't served a repeat.
 --   practice_question_quota — per-user, per-calendar-day count of *new*
---                              Groq generations (serving an existing pool
+--                              Gemini generations (serving an existing pool
 --                              question never touches this counter).
 --
 -- TRUST MODEL NOTE (please read before deploying):
@@ -150,7 +150,7 @@ $$;
 -- pool question for the category (seen or not), most recent first, so the
 -- student still gets *something* to practice rather than a bare error. Does
 -- not touch user_question_views (re-serving a seen question doesn't need a
--- new "seen" record) and never calls Groq.
+-- new "seen" record) and never calls Gemini.
 -- ============================================================================
 create or replace function public.any_pool_question(
   p_section text, p_domain text, p_topic text, p_difficulty text
@@ -174,7 +174,7 @@ $$;
 
 -- ============================================================================
 -- insert_generated_question(): the only way a new row can ever be added to
--- generated_questions. Called by api/practice-question.js only after Groq's
+-- generated_questions. Called by api/practice-question.js only after Gemini's
 -- output has already passed validatePracticeQuestion() in application code;
 -- the CHECK constraint on the `question` column is a second, cheaper layer
 -- in case that ever changes. Also immediately marks the new question as
