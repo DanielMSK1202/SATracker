@@ -1,35 +1,21 @@
 import { setCors } from './_lib/cors.js';
 import { getAuthenticatedUser } from './_lib/supabaseClient.js';
-import { callGroq } from './_lib/groq.js';
+import { callGemini } from './_lib/gemini.js';
 import { PRACTICE_QUESTION_SYSTEM_PROMPT } from './_lib/prompts.js';
 import { validatePracticeQuestion } from './_lib/validate.js';
 import { DIFFICULTIES, SECTION_MATH, SECTION_RW } from './_lib/taxonomy.js';
 
-// Max NEW Groq generations per user per calendar day. Serving an existing
+// Max NEW Gemini generations per user per calendar day. Serving an existing
 // pool question (the common case once the pool has some depth) never
 // touches this - see claim_pool_question() in the 0005 migration.
 const MAX_DAILY_GENERATIONS = 10;
 
-// Question generation is a much simpler task than the full performance
-// analysis (a handful of sentences vs. interpreting a whole profile), so a
-// smaller/cheaper/faster Groq model is a better fit here. This only affects
-// this route - api/ai-analysis.js and api/ai-mistake-analysis.js keep using
-// groq.js's DEFAULT_MODEL exactly as before.
-//
-// gpt-oss-20b is a reasoning model: part of max_tokens is spent on internal
-// "thinking" before it writes the actual JSON answer, so this needs a much
-// bigger budget than the answer's own length would suggest.
-// reasoning_effort was originally set to 'low' to keep this fast/cheap, but
-// that starved real math problems of enough internal reasoning - instead of
-// solving it privately, the model started "thinking out loud" inside the
-// explanation field itself (visible hedging like "wait, that's wrong" or
-// "actually...") and sometimes committed to an answer that contradicted its
-// own work. 'medium' gives it enough room to actually work the problem out
-// before answering, at the cost of a bit more latency - still far
-// cheaper/faster than the 120b model used for full analysis.
-const PRACTICE_QUESTION_MODEL = 'openai/gpt-oss-20b';
+// Question generation now runs on Gemini instead of Groq (api/ai-analysis.js
+// and api/ai-mistake-analysis.js are unaffected and keep using groq.js
+// exactly as before). Leaving maxTokens generous since, same as the old
+// gpt-oss-20b, Gemini's own internal "thinking" (if the model does any)
+// draws from this budget before it writes the actual JSON answer.
 const PRACTICE_QUESTION_MAX_TOKENS = 3000;
-const PRACTICE_QUESTION_REASONING_EFFORT = 'medium';
 
 // Flattens the DB row (metadata columns + a nested `question` jsonb blob)
 // into a single object the frontend can use directly - stem/choices/
@@ -97,7 +83,7 @@ export default async function handler(req, res) {
       return { used: usedCount, max: MAX_DAILY_GENERATIONS, remaining: Math.max(0, MAX_DAILY_GENERATIONS - usedCount) };
     }
 
-    // 1) Serve an unseen pool question if one exists. Never touches Groq,
+    // 1) Serve an unseen pool question if one exists. Never touches Gemini,
     // never counts against the daily quota.
     const { data: claimed, error: claimErr } = await client.rpc('claim_pool_question', {
       p_section: section, p_domain: domain, p_topic: topic, p_difficulty: difficulty,
@@ -110,7 +96,7 @@ export default async function handler(req, res) {
     }
 
     // 2) No unseen pool question - check (and atomically reserve) today's
-    // quota before calling Groq at all.
+    // quota before calling Gemini at all.
     const { data: newCount, error: quotaBumpErr } = await client.rpc('bump_practice_quota', {
       p_date: localDate, p_max: MAX_DAILY_GENERATIONS,
     });
@@ -140,21 +126,19 @@ export default async function handler(req, res) {
       return;
     }
 
-    // 3) Quota available and reserved - generate one new question with Groq.
+    // 3) Quota available and reserved - generate one new question with Gemini.
     let validated;
     let model = null;
     try {
-      const { parsed, model: usedModel } = await callGroq({
+      const { parsed, model: usedModel } = await callGemini({
         systemPrompt: PRACTICE_QUESTION_SYSTEM_PROMPT,
         userContent: JSON.stringify({ section, domain, topic, difficulty }),
         maxTokens: PRACTICE_QUESTION_MAX_TOKENS,
-        model: PRACTICE_QUESTION_MODEL,
-        reasoningEffort: PRACTICE_QUESTION_REASONING_EFFORT,
       });
       validated = validatePracticeQuestion(parsed, { section, domain, topic, difficulty });
       model = usedModel;
-    } catch (groqErr) {
-      console.error('Groq practice-question generation failed', groqErr?.code, groqErr?.message);
+    } catch (genErr) {
+      console.error('Gemini practice-question generation failed', genErr?.code, genErr?.message);
       // The quota slot was already spent for this attempt (matches the
       // existing ai-analysis.js "attempt" semantics: a failed try still
       // counts, so retries can't be used to bypass the limit). Fall back to
@@ -171,7 +155,7 @@ export default async function handler(req, res) {
         });
         return;
       }
-      const friendly = groqErr?.code === 'missing_api_key'
+      const friendly = genErr?.code === 'missing_api_key'
         ? 'Practice questions are not configured yet. Please try again later.'
         : 'Could not generate a practice question right now. Please try again shortly.';
       res.status(502).json({ error: friendly, quota });

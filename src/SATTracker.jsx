@@ -1106,47 +1106,148 @@ function AnalyzeMistakeBlock({ errorId }) {
  * model for (x^2, x_1, \sqrt{16}, \frac{a}{b}) into actual superscripts,
  * subscripts, radicals, and stacked fractions, instead of showing the raw
  * caret/underscore/backslash characters verbatim. Deliberately a small
- * regex-based renderer rather than a full LaTeX engine (no new dependency,
+ * hand-written parser rather than a full LaTeX engine (no new dependency,
  * and the prompt only asks the model for this small, fixed vocabulary of
  * constructs) - see PRACTICE_QUESTION_SYSTEM_PROMPT in prompts.js for the
- * exact notation this is built to match. The leading backslash on
- * \sqrt/\frac is made optional here (matching "sqrt{...}"/"frac{...}" too)
- * as a defensive fallback for whenever the model drops it despite being
- * told not to - the prompt is the source of truth, this is just a safety net.
+ * exact notation this is built to match.
+ *
+ * Unlike a flat regex, this walks the string with proper brace matching, so
+ * \frac and \sqrt can contain each other (e.g. \frac{7+\sqrt{29}}{2}, the
+ * quadratic formula) instead of only matching when their contents have no
+ * braces at all.
+ *
+ * The leading backslash on \sqrt/\frac is optional here (matching
+ * "sqrt{...}"/"frac{...}" too) as a defensive fallback for whenever the
+ * model drops it despite being told not to - the prompt is the source of
+ * truth, this is just a safety net. SYMBOL_REPLACEMENTS is the same kind of
+ * safety net for a small set of other LaTeX commands models sometimes slip
+ * in (\ge, \le, \pm, \times, \pi, ...) even though the prompt says to use
+ * plain ASCII instead - these render as their real symbol rather than
+ * showing the raw backslash command.
  */
+const SYMBOL_REPLACEMENTS = [
+  ['\\geq', '\u2265'], ['\\leq', '\u2264'], ['\\neq', '\u2260'],
+  ['\\times', '\u00d7'], ['\\approx', '\u2248'], ['\\infty', '\u221e'],
+  ['\\degree', '\u00b0'], ['\\alpha', '\u03b1'], ['\\theta', '\u03b8'],
+  ['\\circ', '\u00b0'], ['\\div', '\u00f7'], ['\\pi', '\u03c0'],
+  ['\\pm', '\u00b1'], ['\\mp', '\u2213'], ['\\cdot', '\u00b7'],
+  ['\\ge', '\u2265'], ['\\le', '\u2264'], ['\\ne', '\u2260'],
+];
+
+const PLAIN_SUP_SUB = /^-?[A-Za-z0-9.]+/;
+
+// Finds the matching closing brace/paren for the one at text[openIndex],
+// counting nested pairs so e.g. \frac{7+\sqrt{29}}{2} finds the outer "}"
+// that actually closes the numerator, not the inner sqrt's.
+function findBalanced(text, openIndex, openCh, closeCh) {
+  let depth = 0;
+  for (let i = openIndex; i < text.length; i++) {
+    if (text[i] === openCh) depth++;
+    else if (text[i] === closeCh) {
+      depth--;
+      if (depth === 0) return { inner: text.slice(openIndex + 1, i), nextIndex: i + 1 };
+    }
+  }
+  return null;
+}
+
+function renderMathNodes(text, keyRef) {
+  const nodes = [];
+  let i = 0;
+  let buffer = '';
+  const flush = () => { if (buffer) { nodes.push(buffer); buffer = ''; } };
+
+  while (i < text.length) {
+    if (text.startsWith('\\frac{', i) || text.startsWith('frac{', i)) {
+      const braceStart = text.indexOf('{', i);
+      const num = findBalanced(text, braceStart, '{', '}');
+      if (num && text[num.nextIndex] === '{') {
+        const den = findBalanced(text, num.nextIndex, '{', '}');
+        if (den) {
+          flush();
+          nodes.push(
+            <span key={keyRef.k++} className="mx-0.5 inline-flex flex-col items-center align-middle text-[0.85em] leading-tight">
+              <span className="px-0.5">{renderMathNodes(num.inner, keyRef)}</span>
+              <span className="w-full border-t border-current px-0.5">{renderMathNodes(den.inner, keyRef)}</span>
+            </span>,
+          );
+          i = den.nextIndex;
+          continue;
+        }
+      }
+    }
+
+    if (text.startsWith('\\sqrt{', i) || text.startsWith('sqrt{', i)) {
+      const braceStart = text.indexOf('{', i);
+      const grp = findBalanced(text, braceStart, '{', '}');
+      if (grp) {
+        flush();
+        nodes.push(
+          <span key={keyRef.k++} className="whitespace-nowrap">
+            &radic;<span className="border-t border-current px-0.5">{renderMathNodes(grp.inner, keyRef)}</span>
+          </span>,
+        );
+        i = grp.nextIndex;
+        continue;
+      }
+    }
+
+    if (text.startsWith('\\sqrt(', i) || text.startsWith('sqrt(', i)) {
+      const parenStart = text.indexOf('(', i);
+      const grp = findBalanced(text, parenStart, '(', ')');
+      if (grp) {
+        flush();
+        nodes.push(
+          <span key={keyRef.k++} className="whitespace-nowrap">
+            &radic;<span className="border-t border-current px-0.5">{renderMathNodes(grp.inner, keyRef)}</span>
+          </span>,
+        );
+        i = grp.nextIndex;
+        continue;
+      }
+    }
+
+    const ch = text[i];
+    if (ch === '^' || ch === '_') {
+      if (text[i + 1] === '{') {
+        const grp = findBalanced(text, i + 1, '{', '}');
+        if (grp) {
+          flush();
+          const rendered = renderMathNodes(grp.inner, keyRef);
+          nodes.push(ch === '^' ? <sup key={keyRef.k++}>{rendered}</sup> : <sub key={keyRef.k++}>{rendered}</sub>);
+          i = grp.nextIndex;
+          continue;
+        }
+      } else {
+        const m = PLAIN_SUP_SUB.exec(text.slice(i + 1));
+        if (m) {
+          flush();
+          nodes.push(ch === '^' ? <sup key={keyRef.k++}>{m[0]}</sup> : <sub key={keyRef.k++}>{m[0]}</sub>);
+          i += 1 + m[0].length;
+          continue;
+        }
+      }
+    }
+
+    if (ch === '\\') {
+      const hit = SYMBOL_REPLACEMENTS.find(([token]) => text.startsWith(token, i));
+      if (hit) {
+        buffer += hit[1];
+        i += hit[0].length;
+        continue;
+      }
+    }
+
+    buffer += ch;
+    i += 1;
+  }
+  flush();
+  return nodes;
+}
+
 function renderMathText(text) {
   if (!text) return text;
-  const regex = /\\?frac\{([^{}]*)\}\{([^{}]*)\}|\\?sqrt\{([^{}]*)\}|\\?sqrt\(([^()]*)\)|\^\{([^{}]+)\}|\^(-?[A-Za-z0-9.]+)|_\{([^{}]+)\}|_(-?[A-Za-z0-9.]+)/g;
-  const nodes = [];
-  let lastIndex = 0;
-  let match;
-  let key = 0;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
-    const [, fracNum, fracDen, sqrtBraced, sqrtParen, supBraced, supPlain, subBraced, subPlain] = match;
-    if (fracNum !== undefined) {
-      nodes.push(
-        <span key={key++} className="mx-0.5 inline-flex flex-col items-center align-middle text-[0.85em] leading-tight">
-          <span className="px-0.5">{fracNum}</span>
-          <span className="w-full border-t border-current px-0.5">{fracDen}</span>
-        </span>,
-      );
-    } else if (sqrtBraced !== undefined || sqrtParen !== undefined) {
-      const inner = sqrtBraced !== undefined ? sqrtBraced : sqrtParen;
-      nodes.push(
-        <span key={key++} className="whitespace-nowrap">
-          &radic;<span className="border-t border-current px-0.5">{inner}</span>
-        </span>,
-      );
-    } else if (supBraced !== undefined || supPlain !== undefined) {
-      nodes.push(<sup key={key++}>{supBraced !== undefined ? supBraced : supPlain}</sup>);
-    } else {
-      nodes.push(<sub key={key++}>{subBraced !== undefined ? subBraced : subPlain}</sub>);
-    }
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
-  return nodes;
+  return renderMathNodes(text, { k: 0 });
 }
 
 function MathText({ text, className }) {

@@ -162,6 +162,15 @@ Rules:
       multi-character subscripts, e.g. a_{n+1}.
     - Square roots: \sqrt{...}, e.g. \sqrt{16}, \sqrt{x+1}.
     - Fractions: \frac{numerator}{denominator}, e.g. \frac{3}{4}.
+    - \sqrt and \frac may be nested inside each other when the math
+      genuinely requires it, e.g. \frac{7+\sqrt{29}}{2} for a
+      quadratic-formula-style answer - do not avoid a correct nested
+      expression just to keep the notation simpler.
+    - Comparisons and operators: plain ASCII only - >=, <=, !=, +/-, * -
+      never a LaTeX command like \ge, \le, \pm, \times, or \cdot.
+    - Do not use any backslash command other than \sqrt and \frac (no \pi,
+      \infty, \approx, \circ, etc.) - spell these out instead (e.g. "pi",
+      "degrees").
     - Do not use Unicode superscript/subscript characters, do not use "**"
       for exponents, and do not wrap ordinary equations in unnecessary
       outer parentheses (write "f(x) = x^2 + 1", not "(f(x)=x^2+1)").
