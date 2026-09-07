@@ -57,7 +57,7 @@ returns uuid
 language sql
 immutable
 as $$
-  select '225aeee2-93fa-4163-a72b-43de0175ed44'::uuid; -- <-- REPLACE with your own auth.users.id
+  select '00000000-0000-0000-0000-000000000000'::uuid; -- <-- REPLACE with your own auth.users.id
 $$;
 
 create or replace function public._require_admin()

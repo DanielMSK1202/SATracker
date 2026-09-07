@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from './auth/AuthContext';
 import * as db from './lib/db';
 import {
@@ -13,18 +13,14 @@ import {
 } from 'lucide-react';
 import { fetchPerformanceAnalysis, analyzeMistake as analyzeMistakeApi, requestPracticeQuestion } from './lib/ai';
 import AdminPanel from './admin/AdminPanel.jsx';
+import {
+  SECTION_MATH, SECTION_RW, DOMAINS, DIFFICULTIES, SERIF, toLocalIso, todayIso,
+  lightTokens, darkTokens, ThemeCtx, useTheme, inputCls, Button, Card, Field,
+} from './shared/ui.jsx';
 
 /* ------------------------------------------------------------------ */
 /*  Constants & data model                                             */
 /* ------------------------------------------------------------------ */
-
-export const SECTION_MATH = 'Math';
-export const SECTION_RW = 'Reading & Writing';
-
-export const DOMAINS = {
-  [SECTION_MATH]: ['Algebra', 'Advanced Math', 'Problem-Solving and Data Analysis', 'Geometry and Trigonometry'],
-  [SECTION_RW]: ['Information and Ideas', 'Craft and Structure', 'Expression of Ideas', 'Standard English Conventions'],
-};
 
 const TOPICS = {
   'Algebra': ['Linear equations in one variable', 'Linear functions', 'Linear inequalities', 'Systems of two linear equations', 'Linear equations in two variables'],
@@ -38,7 +34,6 @@ const TOPICS = {
 };
 
 const REASONS = ['Careless error', 'Misread the question', "Didn't know the concept", 'Ran out of time', 'Wrong strategy or approach', 'Overcomplicated it', 'Second-guessed the correct answer', 'Other'];
-export const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
 const STATUSES = ['Unreviewed', 'Reviewing', 'Mastered'];
 
 const NAV_ITEMS = [
@@ -59,7 +54,6 @@ const ADMIN_NAV_ITEM = { id: 'admin', label: 'Admin', icon: ShieldAlert };
 const DEFAULT_CONFIG = { userName: '', theme: 'light', targetTotal: 1400, targetMath: 700, targetRW: 700 };
 export const K = { TESTS: 'sat-tracker:practice-tests', ERRORS: 'sat-tracker:error-log', CONFIG: 'sat-tracker:app-config' };
 
-export const SERIF = { fontFamily: "'Source Serif 4', Georgia, serif" };
 const MONO = { fontFamily: "'IBM Plex Mono', ui-monospace, monospace" };
 
 // Single source of truth for chart colors, referenced by every chart instead of
@@ -89,15 +83,6 @@ function fmtShort(iso) {
   const d = new Date(iso + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
-function toLocalIso(d) {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-// Uses local calendar date components (not toISOString, which is UTC-based and can
-// land on the wrong day near midnight depending on the browser's time zone).
-export function todayIso() { return toLocalIso(new Date()); }
 function isoDaysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return toLocalIso(d); }
 function statusTone(status) { return status === 'Mastered' ? 'emerald' : status === 'Reviewing' ? 'amber' : 'rose'; }
 
@@ -251,36 +236,9 @@ function buildDemoData() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Theme                                                               */
+/*  Theme (ThemeCtx/useTheme/lightTokens/darkTokens/inputCls now live   */
+/*  in shared/ui.jsx, imported above)                                   */
 /* ------------------------------------------------------------------ */
-
-export const lightTokens = {
-  dark: false,
-  pageBg: 'bg-slate-50',
-  card: 'bg-white border-slate-200',
-  text: 'text-slate-900',
-  textMuted: 'text-slate-600',
-  textFaint: 'text-slate-500',
-  border: 'border-slate-200',
-  input: 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-amber-500',
-  hoverSubtle: 'hover:bg-slate-100',
-  chip: 'bg-slate-100 text-slate-700 border-slate-200',
-};
-const darkTokens = {
-  dark: true,
-  pageBg: 'bg-slate-950',
-  card: 'bg-slate-900 border-slate-800',
-  text: 'text-slate-100',
-  textMuted: 'text-slate-300',
-  textFaint: 'text-slate-400',
-  border: 'border-slate-800',
-  input: 'bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-amber-500',
-  hoverSubtle: 'hover:bg-slate-800',
-  chip: 'bg-slate-800 text-slate-300 border-slate-700',
-};
-export const ThemeCtx = createContext(lightTokens);
-export const useTheme = () => useContext(ThemeCtx);
-export const inputCls = (t) => `w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors ${t.input}`;
 
 // Shared dialog behavior for Modal/ConfirmDialog: closes on Escape and locks
 // background scroll while open. Centralized so both components stay consistent.
@@ -318,18 +276,7 @@ function GlobalStyles() {
   );
 }
 
-export function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
-  const t = useTheme();
-  const base = 'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
-  const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-5 py-2.5 text-sm' };
-  const variants = {
-    primary: 'bg-amber-600 text-white hover:bg-amber-700',
-    secondary: `border ${t.border} ${t.text} ${t.hoverSubtle}`,
-    danger: 'bg-rose-600 text-white hover:bg-rose-700',
-    ghost: `${t.textMuted} ${t.hoverSubtle}`,
-  };
-  return <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} {...props}>{children}</button>;
-}
+// Button/Card/Field now live in shared/ui.jsx, imported above.
 
 function IconButton({ icon: Icon, onClick, label, tone = 'default' }) {
   const t = useTheme();
@@ -354,35 +301,6 @@ function Badge({ children, tone = 'neutral' }) {
     sky: t.dark ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : 'bg-sky-50 text-sky-700 border-sky-200',
   };
   return <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.neutral}`}>{children}</span>;
-}
-
-export function Card({ title, subtitle, children, tone = 'default', className = '' }) {
-  const t = useTheme();
-  const toneCls = tone === 'danger'
-    ? (t.dark ? 'bg-slate-900 border-rose-900/50' : 'bg-white border-rose-200')
-    : t.card;
-  return (
-    <div className={`rounded-xl border p-5 sm:p-6 ${toneCls} ${className}`}>
-      {title && (
-        <div className="mb-4">
-          <h3 className="text-base font-semibold" style={SERIF}>{title}</h3>
-          {subtitle && <p className={`mt-1 text-sm ${t.textMuted}`}>{subtitle}</p>}
-        </div>
-      )}
-      {children}
-    </div>
-  );
-}
-
-export function Field({ label, children, hint }) {
-  const t = useTheme();
-  return (
-    <label className="block">
-      <span className={`mb-1.5 block text-sm font-medium ${t.text}`}>{label}</span>
-      {children}
-      {hint && <span className={`mt-1 block text-xs ${t.textMuted}`}>{hint}</span>}
-    </label>
-  );
 }
 
 function EmptyState({ icon: Icon, title, description, action }) {

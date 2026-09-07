@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from './AuthContext';
-import { Button, Card, Field, inputCls, ThemeCtx, lightTokens, SERIF } from '../SATTracker.jsx';
+import { Button, Card, Field, inputCls, ThemeCtx, lightTokens, SERIF } from '../shared/ui.jsx';
 
 export default function AuthScreen() {
   const { signIn, signUp, authError, setAuthError } = useAuth();

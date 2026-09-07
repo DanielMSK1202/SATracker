@@ -3,8 +3,8 @@ import {
   ShieldAlert, Loader2, RefreshCw, Ban, CheckCircle2, Trash2, Users, HelpCircle, Gauge,
 } from 'lucide-react';
 import {
-  Card, Button, Field, useTheme, inputCls, todayIso, SECTION_MATH, SECTION_RW, DOMAINS, DIFFICULTIES, SERIF,
-} from '../SATTracker.jsx';
+  Card, Button, Field, useTheme, inputCls, todayIso, SECTION_MATH, SECTION_RW, DOMAINS, DIFFICULTIES,
+} from '../shared/ui.jsx';
 import { fetchAdminUsers, toggleUserBlock, fetchAdminQuestions, deleteAdminQuestion } from '../lib/adminApi';
 
 /* ------------------------------------------------------------------ */
@@ -139,9 +139,12 @@ function UsersTab() {
 /*  Questions tab                                                       */
 /* ------------------------------------------------------------------ */
 
-const ALL_DOMAINS = [...DOMAINS[SECTION_MATH], ...DOMAINS[SECTION_RW]];
-
 function QuestionsTab() {
+  // Computed inside the component (not at module scope) because this file
+  // is imported by SATTracker.jsx, which itself imports this file - doing
+  // this at module top-level would read DOMAINS/SECTION_MATH/SECTION_RW
+  // before that circular import has finished initializing them.
+  const allDomains = useMemo(() => [...DOMAINS[SECTION_MATH], ...DOMAINS[SECTION_RW]], []);
   const t = useTheme();
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -191,7 +194,7 @@ function QuestionsTab() {
           <Field label="Domain">
             <select className={inputCls(t)} value={filters.domain} onChange={(e) => setFilters((f) => ({ ...f, domain: e.target.value }))}>
               <option value="">All</option>
-              {(filters.section ? DOMAINS[filters.section] : ALL_DOMAINS).map((d) => <option key={d} value={d}>{d}</option>)}
+              {(filters.section ? DOMAINS[filters.section] : allDomains).map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </Field>
           <Field label="Topic">

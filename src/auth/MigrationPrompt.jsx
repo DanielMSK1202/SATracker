@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { storage } from '../utils/storage';
 import * as db from '../lib/db';
+import { Button, Card, ThemeCtx, lightTokens, SERIF } from '../shared/ui.jsx';
 import {
-  Button, Card, ThemeCtx, lightTokens, SERIF,
   K, sanitizeTests, sanitizeErrors, sanitizeConfig, LoadingScreen,
 } from '../SATTracker.jsx';
 
